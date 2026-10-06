@@ -24,3 +24,32 @@ body {
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
 }
+
+@keyframes optical-sweep {
+  0% {
+    top: 6%;
+    opacity: 0;
+  }
+  14% {
+    opacity: 1;
+  }
+  86% {
+    opacity: 1;
+  }
+  100% {
+    top: 94%;
+    opacity: 0;
+  }
+}
+
+.optical-sweep {
+  top: 6%;
+  animation: optical-sweep 2.4s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .optical-sweep {
+    animation-duration: 5s;
+  }
+}
+

@@ -1,103 +1,130 @@
-import Image from "next/image";
+"use client";
+
+import { useCallback, useState } from "react";
+import { ScanLine } from "lucide-react";
+import OpticalScanner, {
+  createAssetFromScan,
+  type AssetStatus,
+  type ScanResult,
+  type ScannedAsset,
+} from "@/components/OpticalScanner";
+import AssetLedgerTable from "@/components/AssetLedgerTable";
+
+const SEED_ASSETS: ReadonlyArray<ScannedAsset> = [
+  {
+    id: "seed-001",
+    serial: "SN-HW-849201",
+    name: "ThinkPad X1 Carbon Gen 11",
+    category: "Laptop",
+    status: "Verified",
+    lastScan: "2026-10-06 08:12:44",
+  },
+  {
+    id: "seed-002",
+    serial: "SN-HW-730158",
+    name: "HPE ProLiant DL360 Gen11",
+    category: "Server",
+    status: "Verified",
+    lastScan: "2026-10-06 08:19:07",
+  },
+  {
+    id: "seed-003",
+    serial: "SN-HW-556420",
+    name: "Ubiquiti UDM-Pro",
+    category: "Network",
+    status: "Pending",
+    lastScan: "2026-10-06 08:31:55",
+  },
+  {
+    id: "seed-004",
+    serial: "SN-HW-118974",
+    name: "Samsung 990 Pro 2TB",
+    category: "Storage",
+    status: "Verified",
+    lastScan: "2026-10-06 08:47:13",
+  },
+  {
+    id: "seed-005",
+    serial: "SN-HW-402386",
+    name: "Dell UltraSharp U2723QE",
+    category: "Display",
+    status: "Flagged",
+    lastScan: "2026-10-06 09:02:38",
+  },
+  {
+    id: "seed-006",
+    serial: "SN-HW-967512",
+    name: "Dell OptiPlex 7020 Micro",
+    category: "Desktop",
+    status: "Pending",
+    lastScan: "2026-10-06 09:15:26",
+  },
+];
 
 export default function Home() {
-  return (
-    <div className="font-sans grid grid-rows-[20px_1fr_20px] items-center justify-items-center min-h-screen p-8 pb-20 gap-16 sm:p-20">
-      <main className="flex flex-col gap-[32px] row-start-2 items-center sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={180}
-          height={38}
-          priority
-        />
-        <ol className="font-mono list-inside list-decimal text-sm/6 text-center sm:text-left">
-          <li className="mb-2 tracking-[-.01em]">
-            Get started by editing{" "}
-            <code className="bg-black/[.05] dark:bg-white/[.06] font-mono font-semibold px-1 py-0.5 rounded">
-              src/app/page.tsx
-            </code>
-            .
-          </li>
-          <li className="tracking-[-.01em]">
-            Save and see your changes instantly.
-          </li>
-        </ol>
+  const [assets, setAssets] = useState<ScannedAsset[]>(() => [...SEED_ASSETS]);
 
-        <div className="flex gap-4 items-center flex-col sm:flex-row">
-          <a
-            className="rounded-full border border-solid border-transparent transition-colors flex items-center justify-center bg-foreground text-background gap-2 hover:bg-[#383838] dark:hover:bg-[#ccc] font-medium text-sm sm:text-base h-10 sm:h-12 px-4 sm:px-5 sm:w-auto"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={20}
-              height={20}
-            />
-            Deploy now
-          </a>
-          <a
-            className="rounded-full border border-solid border-black/[.08] dark:border-white/[.145] transition-colors flex items-center justify-center hover:bg-[#f2f2f2] dark:hover:bg-[#1a1a1a] hover:border-transparent font-medium text-sm sm:text-base h-10 sm:h-12 px-4 sm:px-5 w-full sm:w-auto md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Read our docs
-          </a>
+  const handleScanComplete = useCallback((scan: ScanResult) => {
+    const incoming = createAssetFromScan(scan);
+    setAssets((previous) => {
+      const index = previous.findIndex(
+        (asset) => asset.serial.toLowerCase() === incoming.serial.toLowerCase(),
+      );
+      if (index < 0) {
+        return [incoming, ...previous];
+      }
+      const merged = [...previous];
+      const [existing] = merged.splice(index, 1);
+      if (!existing) {
+        return previous;
+      }
+      return [{ ...existing, lastScan: incoming.lastScan }, ...merged];
+    });
+  }, []);
+
+  const handleStatusChange = useCallback((id: string, status: AssetStatus) => {
+    setAssets((previous) =>
+      previous.map((asset) => (asset.id === id ? { ...asset, status } : asset)),
+    );
+  }, []);
+
+  return (
+    <div className="min-h-screen bg-[#081325] font-sans text-white">
+      <header className="sticky top-0 z-30 border-b border-[#45464d]/40 bg-[#040e20]/95 backdrop-blur">
+        <div className="mx-auto flex max-w-[1600px] flex-wrap items-center justify-between gap-3 px-4 py-3 sm:px-6 lg:px-8">
+          <div className="flex items-center gap-3">
+            <span className="grid h-10 w-10 place-items-center rounded-2xl border border-[#7bd0ff]/40 bg-[#081325] text-[#7bd0ff]">
+              <ScanLine className="h-5 w-5" aria-hidden="true" />
+            </span>
+            <div>
+              <p className="font-mono text-[10px] uppercase tracking-[0.28em] text-[#909097]">
+                Assetflow Optical Verification
+              </p>
+              <h1 className="text-lg font-semibold tracking-tight text-white">
+                BAY 4 INTAKE
+              </h1>
+            </div>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="rounded-xl border border-[#45464d]/60 bg-[#111c2e] px-3 py-1.5 font-mono text-[11px] tracking-[0.1em] text-[#909097]">
+              v1.0.0
+            </span>
+            <span className="flex items-center gap-2 rounded-xl border border-[#4ade80]/40 bg-[#042f1a] px-3 py-1.5 font-mono text-[11px] uppercase tracking-[0.14em] text-[#4ade80]">
+              <span className="relative flex h-2 w-2">
+                <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-[#4ade80] opacity-75" />
+                <span className="relative inline-flex h-2 w-2 rounded-full bg-[#4ade80]" />
+              </span>
+              Gateway Online
+            </span>
+          </div>
         </div>
+      </header>
+
+      <main className="mx-auto grid max-w-[1600px] items-start gap-6 px-4 py-6 sm:px-6 lg:px-8 xl:grid-cols-[minmax(0,380px)_minmax(0,1fr)]">
+        <OpticalScanner onScanComplete={handleScanComplete} />
+        <AssetLedgerTable assets={assets} onStatusChange={handleStatusChange} />
       </main>
-      <footer className="row-start-3 flex gap-[24px] flex-wrap items-center justify-center">
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/file.svg"
-            alt="File icon"
-            width={16}
-            height={16}
-          />
-          Learn
-        </a>
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/window.svg"
-            alt="Window icon"
-            width={16}
-            height={16}
-          />
-          Examples
-        </a>
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://nextjs.org?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/globe.svg"
-            alt="Globe icon"
-            width={16}
-            height={16}
-          />
-          Go to nextjs.org →
-        </a>
-      </footer>
     </div>
   );
 }
