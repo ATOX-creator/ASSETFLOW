@@ -1,28 +1,269 @@
 @import "tailwindcss";
 
-:root {
-  --background: #ffffff;
-  --foreground: #171717;
+@custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));
+
+/*
+  Design tokens.
+
+  Semantic light/dark palette. Every surface/text/border class in the app
+  points at these tokens. Values are tuned for WCAG 2.2 AA:
+  body text >= 4.5:1, UI boundaries (fields, ghost buttons, cards) >= 3:1
+  against their adjacent surfaces in BOTH themes.
+*/
+:root,
+[data-theme="light"] {
+  --app: #f4f6fb;
+  --panel: #ffffff;
+  --header: #eef1f7;
+  --inset: #f8fafc;
+  --line: #848da0;
+  --muted: #5c6675;
+  --ink: #0d1526;
+  --faint: #626979;
+  --accent: #0369a1;
+  --accent-soft: rgba(3, 105, 161, 0.12);
+  --primary: #0053db;
+  --primary-hover: #0046bb;
+  --shadow: 0 18px 40px -28px rgba(15, 23, 42, 0.45);
+
+  --tone-green-bg: #dcfce7;
+  --tone-green-fg: #14532d;
+  --tone-blue-bg: #dbeafe;
+  --tone-blue-fg: #1e3a8a;
+  --tone-orange-bg: #ffedd5;
+  --tone-orange-fg: #7c2d12;
+  --tone-red-bg: #fee2e2;
+  --tone-red-fg: #7f1d1d;
+  --tone-crimson-bg: #ffe4e6;
+  --tone-crimson-fg: #9f1239;
+  --tone-gray-bg: #e5e7eb;
+  --tone-gray-fg: #374151;
+
+  --success: #15803d;
+  --warning: #c2410c;
+  --danger: #b91c1c;
+  --info: #0369a1;
+}
+
+[data-theme="dark"] {
+  --app: #081325;
+  --panel: #152032;
+  --header: #111c2e;
+  --inset: #040e20;
+  --line: #667186;
+  --muted: #9aa8bd;
+  --ink: #e8eef9;
+  --faint: #8b94a6;
+  --accent: #7bd0ff;
+  --accent-soft: rgba(123, 208, 255, 0.1);
+  --primary: #2563eb;
+  --primary-hover: #1d4ed8;
+  --shadow: 0 18px 40px -24px rgba(0, 0, 0, 0.9);
+
+  --tone-green-bg: rgba(74, 222, 128, 0.12);
+  --tone-green-fg: #4ade80;
+  --tone-blue-bg: rgba(123, 208, 255, 0.12);
+  --tone-blue-fg: #7bd0ff;
+  --tone-orange-bg: rgba(251, 146, 60, 0.14);
+  --tone-orange-fg: #fb923c;
+  --tone-red-bg: rgba(248, 113, 113, 0.14);
+  --tone-red-fg: #f87171;
+  --tone-crimson-bg: rgba(225, 29, 72, 0.18);
+  --tone-crimson-fg: #fda4af;
+  --tone-gray-bg: rgba(154, 168, 189, 0.14);
+  --tone-gray-fg: #b3b3ba;
+
+  --success: #4ade80;
+  --warning: #fb923c;
+  --danger: #f87171;
+  --info: #7bd0ff;
 }
 
 @theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
+  --color-app: var(--app);
+  --color-panel: var(--panel);
+  --color-header: var(--header);
+  --color-inset: var(--inset);
+  --color-line: var(--line);
+  --color-muted: var(--muted);
+  --color-ink: var(--ink);
+  --color-faint: var(--faint);
+  --color-accent: var(--accent);
+  --color-accent-soft: var(--accent-soft);
+  --color-primary: var(--primary);
+  --color-primary-hover: var(--primary-hover);
+  --color-success: var(--success);
+  --color-warning: var(--warning);
+  --color-danger: var(--danger);
+  --color-info: var(--info);
+  --color-tone-green: var(--tone-green-fg);
+  --color-tone-blue: var(--tone-blue-fg);
+  --color-tone-orange: var(--tone-orange-fg);
+  --color-tone-red: var(--tone-red-fg);
+  --color-tone-crimson: var(--tone-crimson-fg);
+  --color-tone-gray: var(--tone-gray-fg);
+
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+* {
+  border-color: var(--line);
 }
 
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  background-color: var(--app);
+  color: var(--ink);
+  font-family: var(--font-geist-sans), Arial, Helvetica, sans-serif;
+}
+
+::selection {
+  background-color: var(--accent-soft);
+  color: var(--ink);
+}
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  border-radius: 0.375rem;
+  border: 1px solid transparent;
+  padding: 0.25rem 0.5rem;
+  font-family: var(--font-geist-mono), ui-monospace, monospace;
+  font-size: 10px;
+  line-height: 1;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.tone-green {
+  background-color: var(--tone-green-bg);
+  color: var(--tone-green-fg);
+  border-color: color-mix(in srgb, var(--tone-green-fg) 40%, transparent);
+}
+.tone-blue {
+  background-color: var(--tone-blue-bg);
+  color: var(--tone-blue-fg);
+  border-color: color-mix(in srgb, var(--tone-blue-fg) 40%, transparent);
+}
+.tone-orange {
+  background-color: var(--tone-orange-bg);
+  color: var(--tone-orange-fg);
+  border-color: color-mix(in srgb, var(--tone-orange-fg) 40%, transparent);
+}
+.tone-red {
+  background-color: var(--tone-red-bg);
+  color: var(--tone-red-fg);
+  border-color: color-mix(in srgb, var(--tone-red-fg) 40%, transparent);
+}
+.tone-crimson {
+  background-color: var(--tone-crimson-bg);
+  color: var(--tone-crimson-fg);
+  border-color: color-mix(in srgb, var(--tone-crimson-fg) 50%, transparent);
+}
+.tone-gray {
+  background-color: var(--tone-gray-bg);
+  color: var(--tone-gray-fg);
+  border-color: color-mix(in srgb, var(--tone-gray-fg) 40%, transparent);
+}
+
+.panel {
+  border-radius: 1rem;
+  border: 1px solid var(--line);
+  background-color: var(--panel);
+  box-shadow: var(--shadow);
+}
+
+.eyebrow {
+  font-family: var(--font-geist-mono), ui-monospace, monospace;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.2em;
+  color: var(--muted);
+}
+
+.field {
+  width: 100%;
+  border-radius: 0.75rem;
+  border: 1px solid var(--line);
+  background-color: var(--inset);
+  padding: 0.6rem 0.75rem;
+  font-size: 0.8125rem;
+  color: var(--ink);
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+.field::placeholder {
+  color: var(--muted);
+}
+.field:focus {
+  outline: none;
+  border-color: color-mix(in srgb, var(--accent) 70%, transparent);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 60%, transparent);
+}
+.field:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+.field[aria-invalid="true"] {
+  border-color: color-mix(in srgb, var(--danger) 70%, transparent);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--danger) 50%, transparent);
+}
+/* Reserves room for an in-field trailing control (password visibility). */
+.field-with-trailing {
+  padding-right: 2.5rem;
+}
+
+.btn-primary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  border-radius: 0.75rem;
+  background-color: var(--primary);
+  padding: 0.7rem 1rem;
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: #ffffff;
+  transition: background-color 0.15s ease;
+}
+.btn-primary:hover {
+  background-color: var(--primary-hover);
+}
+.btn-primary:focus-visible {
+  outline: none;
+  box-shadow:
+    0 0 0 2px var(--app),
+    0 0 0 4px var(--accent);
+}
+.btn-primary:disabled {
+  cursor: not-allowed;
+  opacity: 0.7;
+}
+
+.btn-ghost {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  border-radius: 0.75rem;
+  border: 1px solid var(--line);
+  padding: 0.6rem 0.9rem;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  color: var(--ink);
+  transition: border-color 0.15s ease, color 0.15s ease;
+}
+.btn-ghost:hover {
+  border-color: color-mix(in srgb, var(--accent) 60%, transparent);
+  color: var(--accent);
+}
+.btn-ghost:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--accent);
+}
+.btn-ghost:disabled {
+  cursor: not-allowed;
+  opacity: 0.65;
 }
 
 @keyframes optical-sweep {
@@ -52,4 +293,3 @@ body {
     animation-duration: 5s;
   }
 }
-

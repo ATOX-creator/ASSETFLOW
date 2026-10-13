@@ -21,22 +21,18 @@ import type {
   Html5QrcodeCameraScanConfig,
   Html5QrcodeResult,
 } from "html5-qrcode";
-
-export type AssetStatus = "Verified" | "Pending" | "Flagged";
-
-export interface ScannedAsset {
-  id: string;
-  serial: string;
-  name: string;
-  category: string;
-  status: AssetStatus;
-  lastScan: string;
-}
+import { useApp } from "@/lib/i18n";
+import {
+  captureMethodFromFormat,
+  extractIdentifiers,
+  type CaptureMethod,
+} from "@/lib/scan/identifiers";
 
 export interface ScanResult {
   payload: string;
   format: string;
   timestamp: number;
+  method: CaptureMethod;
 }
 
 export function formatTimestamp(date: Date): string {
@@ -58,8 +54,16 @@ interface CameraOption {
   label: string;
 }
 
+type FaultCode =
+  | "permission"
+  | "noDevice"
+  | "busy"
+  | "secure"
+  | "unsupported"
+  | "generic";
+
 interface CameraFault {
-  message: string;
+  code: FaultCode;
   detail: string;
 }
 
@@ -72,64 +76,26 @@ const SCAN_CONFIG: Html5QrcodeCameraScanConfig = { fps: 10, disableFlip: false }
 const DEFAULT_CAMERA: MediaTrackConstraints = { facingMode: "environment" };
 const DUPLICATE_COOLDOWN_MS = 2000;
 const MANUAL_FORMAT = "MANUAL_INPUT";
+const OCR_FORMAT = "OCR_TEXT";
+const OCR_TIMEOUT_MS = 25_000;
+const OCR_MAX_WIDTH = 1600;
 
-const CATALOG: ReadonlyArray<{ name: string; category: string }> = [
-  { name: "ThinkPad X1 Carbon Gen 11", category: "Laptop" },
-  { name: "Dell OptiPlex 7020 Micro", category: "Desktop" },
-  { name: "HPE ProLiant DL360 Gen11", category: "Server" },
-  { name: "Samsung 990 Pro 2TB", category: "Storage" },
-  { name: "Ubiquiti UDM-Pro", category: "Network" },
-  { name: "Dell UltraSharp U2723QE", category: "Display" },
-  { name: "Logitech MX Keys S", category: "Peripheral" },
-  { name: "Synology RS1221+", category: "Storage" },
-  { name: "Cisco Catalyst 9200L", category: "Network" },
-];
-
-function generateId(): string {
-  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
-    return crypto.randomUUID();
+function captureVideoFrame(): string | null {
+  const container = document.getElementById(READER_ELEMENT_ID);
+  const video = container?.querySelector("video");
+  if (!(video instanceof HTMLVideoElement) || video.videoWidth === 0) {
+    return null;
   }
-  return `asset-${Date.now()}-${Math.random().toString(16).slice(2)}`;
-}
-
-function hashPayload(value: string): number {
-  let hash = 2166136261;
-  for (let index = 0; index < value.length; index += 1) {
-    hash ^= value.charCodeAt(index);
-    hash = Math.imul(hash, 16777619);
+  const scale = Math.min(1, OCR_MAX_WIDTH / video.videoWidth);
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.round(video.videoWidth * scale);
+  canvas.height = Math.round(video.videoHeight * scale);
+  const context = canvas.getContext("2d");
+  if (!context) {
+    return null;
   }
-  return hash >>> 0;
-}
-
-export function resolveAssetMeta(payload: string): {
-  name: string;
-  category: string;
-} {
-  const value = payload.trim();
-  if (!value) {
-    return { name: "Unidentified Asset", category: "Peripheral" };
-  }
-  if (/^https?:\/\//i.test(value)) {
-    try {
-      const url = new URL(value);
-      return { name: url.hostname.replace(/^www\./, ""), category: "Network" };
-    } catch {
-      return CATALOG[hashPayload(value) % CATALOG.length];
-    }
-  }
-  return CATALOG[hashPayload(value) % CATALOG.length];
-}
-
-export function createAssetFromScan(scan: ScanResult): ScannedAsset {
-  const meta = resolveAssetMeta(scan.payload);
-  return {
-    id: generateId(),
-    serial: scan.payload.trim() || "SN-HW-UNKNOWN",
-    name: meta.name,
-    category: meta.category,
-    status: "Verified",
-    lastScan: formatTimestamp(new Date(scan.timestamp)),
-  };
+  context.drawImage(video, 0, 0, canvas.width, canvas.height);
+  return canvas.toDataURL("image/png");
 }
 
 function classifyCameraFault(raw: unknown): CameraFault {
@@ -148,10 +114,7 @@ function classifyCameraFault(raw: unknown): CameraFault {
     text.includes("not allowed") ||
     text.includes("denied")
   ) {
-    return {
-      message: "Camera permission denied by the browser",
-      detail: source,
-    };
+    return { code: "permission", detail: source };
   }
   if (
     text.includes("notfounderror") ||
@@ -159,10 +122,7 @@ function classifyCameraFault(raw: unknown): CameraFault {
     text.includes("no video capture devices") ||
     text.includes("no camera")
   ) {
-    return {
-      message: "No camera device detected on this terminal",
-      detail: source,
-    };
+    return { code: "noDevice", detail: source };
   }
   if (
     text.includes("notreadableerror") ||
@@ -170,33 +130,24 @@ function classifyCameraFault(raw: unknown): CameraFault {
     text.includes("in use") ||
     text.includes("aborterror")
   ) {
-    return {
-      message: "Camera hardware is busy in another application",
-      detail: source,
-    };
+    return { code: "busy", detail: source };
   }
   if (text.includes("insecure") || text.includes("secure context")) {
-    return {
-      message: "Camera requires an https or localhost secure context",
-      detail: source,
-    };
+    return { code: "secure", detail: source };
   }
   if (text.includes("notsupported") || text.includes("navigator.mediadevices")) {
-    return {
-      message: "Camera streaming is unsupported by this browser",
-      detail: source,
-    };
+    return { code: "unsupported", detail: source };
   }
-  return { message: "Camera failed to initialise the optical intake", detail: source };
+  return { code: "generic", detail: source };
 }
 
 function ReadoutCell({ label, value }: { label: string; value: string }) {
   return (
     <div className="space-y-1">
-      <p className="font-mono text-[10px] uppercase tracking-[0.18em] text-[#909097]">
+      <p className="font-mono text-[10px] uppercase tracking-[0.18em] text-muted">
         {label}
       </p>
-      <p className="font-mono text-[12px] leading-snug tracking-[0.04em] break-all text-white">
+      <p className="font-mono text-[12px] leading-snug tracking-[0.04em] break-all text-ink">
         {value}
       </p>
     </div>
@@ -204,6 +155,7 @@ function ReadoutCell({ label, value }: { label: string; value: string }) {
 }
 
 export default function OpticalScanner({ onScanComplete }: OpticalScannerProps) {
+  const { t } = useApp();
   const [phase, setPhase] = useState<ScanPhase>("idle");
   const [fault, setFault] = useState<CameraFault | null>(null);
   const [result, setResult] = useState<ScanResult | null>(null);
@@ -213,6 +165,9 @@ export default function OpticalScanner({ onScanComplete }: OpticalScannerProps) 
   const [torchSupported, setTorchSupported] = useState(false);
   const [cameras, setCameras] = useState<CameraOption[]>([]);
   const [hardware, setHardware] = useState("STANDBY");
+  const [ocrBusy, setOcrBusy] = useState(false);
+  const [ocrMessage, setOcrMessage] = useState<string | null>(null);
+  const manualInputRef = useRef<HTMLInputElement | null>(null);
 
   const scannerRef = useRef<Html5Qrcode | null>(null);
   const busyRef = useRef(false);
@@ -359,10 +314,12 @@ export default function OpticalScanner({ onScanComplete }: OpticalScannerProps) 
       lockRef.current = true;
       seenRef.current = { payload, at };
 
+      const format = decoded.result.format?.formatName ?? "UNKNOWN";
       const scan: ScanResult = {
         payload,
-        format: decoded.result.format?.formatName ?? "UNKNOWN",
+        format,
         timestamp: at,
+        method: captureMethodFromFormat(format),
       };
 
       setResult(scan);
@@ -401,7 +358,7 @@ export default function OpticalScanner({ onScanComplete }: OpticalScannerProps) 
         .filter((device) => device.kind === "videoinput")
         .map((device, index) => ({
           id: device.deviceId,
-          label: device.label || `Camera input ${index + 1}`,
+          label: device.label || t("terminal.cameraInput", { n: index + 1 }),
         }));
     } catch {
       options = [];
@@ -426,7 +383,7 @@ export default function OpticalScanner({ onScanComplete }: OpticalScannerProps) 
     }
     const active = options.find((option) => option.id === activeId);
     setHardware(active ? active.label : activeId || "UNKNOWN");
-  }, []);
+  }, [t]);
 
   const startScanner = useCallback(
     async (target?: string | MediaTrackConstraints): Promise<void> => {
@@ -565,6 +522,71 @@ export default function OpticalScanner({ onScanComplete }: OpticalScannerProps) 
     await startScanner(next.id);
   }, [cameras, startScanner, stopScanner]);
 
+  const runOcrCapture = useCallback(async (): Promise<void> => {
+    if (ocrBusy || lockRef.current) {
+      return;
+    }
+    const frame = captureVideoFrame();
+    if (!frame) {
+      setOcrMessage(t("terminal.ocrFailed"));
+      return;
+    }
+    setOcrBusy(true);
+    setOcrMessage(null);
+    try {
+      const { createWorker } = await import("tesseract.js");
+      const worker = await createWorker("eng");
+      try {
+        const recognize = worker.recognize(frame);
+        const timeout = new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error("OCR_TIMEOUT")), OCR_TIMEOUT_MS),
+        );
+        const result = await Promise.race([recognize, timeout]);
+        const text: string =
+          (result as { data?: { text?: string } }).data?.text ?? "";
+        const identifiers = extractIdentifiers(text);
+        if (identifiers.length === 0) {
+          setOcrMessage(t("terminal.ocrNoIdentifiers"));
+          return;
+        }
+        const at = Date.now();
+        lockRef.current = true;
+        const scan: ScanResult = {
+          payload: identifiers
+            .map((identifier) => identifier.value)
+            .join(" · "),
+          format: OCR_FORMAT,
+          timestamp: at,
+          method: "camera_ocr",
+        };
+        const scanner = scannerRef.current;
+        if (scanner) {
+          try {
+            scanner.pause(true);
+          } catch {
+            // scanner was not pausable; result still surfaces below
+          }
+        }
+        setResult(scan);
+        signalHit();
+        if (mountedRef.current) {
+          setPhase("scanned");
+        }
+        completionRef.current(scan);
+      } finally {
+        await worker.terminate().catch(() => undefined);
+      }
+    } catch {
+      if (mountedRef.current) {
+        setOcrMessage(t("terminal.ocrFailed"));
+      }
+    } finally {
+      if (mountedRef.current) {
+        setOcrBusy(false);
+      }
+    }
+  }, [ocrBusy, signalHit, t]);
+
   const submitManual = useCallback(
     (event: FormEvent<HTMLFormElement>): void => {
       event.preventDefault();
@@ -577,6 +599,7 @@ export default function OpticalScanner({ onScanComplete }: OpticalScannerProps) 
         payload,
         format: MANUAL_FORMAT,
         timestamp: Date.now(),
+        method: "keyboard",
       };
       const scanner = scannerRef.current;
       if (scanner) {
@@ -618,51 +641,51 @@ export default function OpticalScanner({ onScanComplete }: OpticalScannerProps) 
 
   const statusLabel =
     phase === "idle"
-      ? "LASER IDLE — CAMERA OFF"
+      ? t("terminal.phaseIdle")
       : phase === "requesting_permission"
-        ? "AWAITING CAMERA PERMISSION"
+        ? t("terminal.phaseRequesting")
         : phase === "scanning"
-          ? "SCANNING — DECODER ACTIVE"
+          ? t("terminal.phaseScanning")
           : phase === "scanned"
-            ? "SCAN LOCKED — PAYLOAD CAPTURED"
-            : "CAMERA FAULT — ACCESS BLOCKED";
+            ? t("terminal.phaseScanned")
+            : t("terminal.phaseError");
 
   const statusColor =
     phase === "scanned"
-      ? "#4ade80"
+      ? "var(--success)"
       : phase === "error"
-        ? "#f87171"
+        ? "var(--danger)"
         : phase === "idle"
-          ? "#909097"
-          : "#7bd0ff";
+          ? "var(--muted)"
+          : "var(--accent)";
 
-  const payloadReadout = result ? result.payload : "———— awaiting payload ————";
+  const payloadReadout = result ? result.payload : t("terminal.ready");
 
   return (
-    <section className="flex flex-col overflow-hidden rounded-2xl border border-[#45464d]/40 bg-[#152032] shadow-[0_18px_40px_-24px_rgba(0,0,0,0.9)]">
-      <header className="flex items-center justify-between gap-3 border-b border-[#45464d]/40 bg-[#111c2e] px-5 py-4">
+    <section className="flex flex-col overflow-hidden rounded-2xl border border-line/40 bg-panel shadow-[var(--shadow)]">
+      <header className="flex items-center justify-between gap-3 border-b border-line/40 bg-header px-5 py-4">
         <div className="flex items-center gap-3">
           <span
-            className={`grid h-9 w-9 place-items-center rounded-xl border border-[#7bd0ff]/40 bg-[#040e20] text-[#7bd0ff] ${
+            className={`grid h-9 w-9 place-items-center rounded-xl border border-accent/40 bg-inset text-accent ${
               phase === "scanning" ? "animate-pulse" : ""
             }`}
           >
             <ScanLine className="h-5 w-5" aria-hidden="true" />
           </span>
           <div>
-            <p className="font-mono text-[10px] uppercase tracking-[0.22em] text-[#909097]">
-              Optical Verification Terminal
+            <p className="font-mono text-[10px] uppercase tracking-[0.22em] text-muted">
+              {t("terminal.eyebrow")}
             </p>
-            <h2 className="text-sm font-semibold text-white">Scanner Bay</h2>
+            <h2 className="text-sm font-semibold text-ink">{t("terminal.bay")}</h2>
           </div>
         </div>
-        <span className="rounded-lg border border-[#45464d]/60 bg-[#040e20] px-2.5 py-1 font-mono text-[10px] uppercase tracking-[0.16em] text-[#7bd0ff]">
-          BAY 04 • OPTICAL INTAKE
+        <span className="rounded-lg border border-line/60 bg-inset px-2.5 py-1 font-mono text-[10px] uppercase tracking-[0.16em] text-accent">
+          {t("terminal.chip")}
         </span>
       </header>
 
       <div className="flex flex-col gap-4 p-5">
-        <div className="relative h-[248px] overflow-hidden rounded-xl border border-[#45464d]/60 bg-[#040e20]">
+        <div className="relative h-[248px] overflow-hidden rounded-xl border border-line/60 bg-inset">
           <div className="pointer-events-none absolute inset-0 [background-image:linear-gradient(rgba(123,208,255,0.06)_1px,transparent_1px),linear-gradient(90deg,rgba(123,208,255,0.06)_1px,transparent_1px)] [background-size:26px_26px]" />
 
           <div
@@ -673,21 +696,21 @@ export default function OpticalScanner({ onScanComplete }: OpticalScannerProps) 
           {!showFeed && (
             <div className="pointer-events-none absolute inset-0 grid place-items-center">
               <div className="flex flex-col items-center gap-2 px-6 text-center">
-                <span className="grid h-11 w-11 place-items-center rounded-xl border border-[#45464d]/60 bg-[#111c2e] text-[#45464d]">
+                <span className="grid h-11 w-11 place-items-center rounded-xl border border-line/60 bg-header text-faint">
                   {phase === "error" ? (
                     <TriangleAlert className="h-5 w-5" aria-hidden="true" />
                   ) : isBusy ? (
-                    <LoaderCircle className="h-5 w-5 animate-spin text-[#7bd0ff]" aria-hidden="true" />
+                    <LoaderCircle className="h-5 w-5 animate-spin text-accent" aria-hidden="true" />
                   ) : (
                     <ScanBarcode className="h-5 w-5" aria-hidden="true" />
                   )}
                 </span>
-                <p className="font-mono text-[10px] uppercase leading-relaxed tracking-[0.2em] text-[#909097]">
+                <p className="font-mono text-[10px] uppercase leading-relaxed tracking-[0.2em] text-muted">
                   {isBusy
-                    ? "Requesting camera stream…"
+                    ? t("terminal.offlineBusy")
                     : phase === "error"
-                      ? "Optical intake offline"
-                      : "Camera stream offline"}
+                      ? t("terminal.offlineError")
+                      : t("terminal.offlineIdle")}
                 </p>
               </div>
             </div>
@@ -695,28 +718,28 @@ export default function OpticalScanner({ onScanComplete }: OpticalScannerProps) 
 
           <div className="pointer-events-none absolute inset-0">
             <span
-              className={`absolute h-6 w-6 border-[#7bd0ff] transition-opacity duration-300 ${
+              className={`absolute h-6 w-6 border-accent transition-opacity duration-300 ${
                 showFeed ? "opacity-90" : "opacity-30"
               }`}
               style={{ top: 14, left: 14, borderTopWidth: 2, borderLeftWidth: 2 }}
               aria-hidden="true"
             />
             <span
-              className={`absolute h-6 w-6 border-[#7bd0ff] transition-opacity duration-300 ${
+              className={`absolute h-6 w-6 border-accent transition-opacity duration-300 ${
                 showFeed ? "opacity-90" : "opacity-30"
               }`}
               style={{ top: 14, right: 14, borderTopWidth: 2, borderRightWidth: 2 }}
               aria-hidden="true"
             />
             <span
-              className={`absolute h-6 w-6 border-[#7bd0ff] transition-opacity duration-300 ${
+              className={`absolute h-6 w-6 border-accent transition-opacity duration-300 ${
                 showFeed ? "opacity-90" : "opacity-30"
               }`}
               style={{ bottom: 14, left: 14, borderBottomWidth: 2, borderLeftWidth: 2 }}
               aria-hidden="true"
             />
             <span
-              className={`absolute h-6 w-6 border-[#7bd0ff] transition-opacity duration-300 ${
+              className={`absolute h-6 w-6 border-accent transition-opacity duration-300 ${
                 showFeed ? "opacity-90" : "opacity-30"
               }`}
               style={{ bottom: 14, right: 14, borderBottomWidth: 2, borderRightWidth: 2 }}
@@ -729,7 +752,7 @@ export default function OpticalScanner({ onScanComplete }: OpticalScannerProps) 
               className="pointer-events-none absolute inset-0 overflow-hidden"
               aria-hidden="true"
             >
-              <div className="optical-sweep absolute inset-x-0 h-px bg-[#7bd0ff] shadow-[0_0_14px_3px_rgba(123,208,255,0.75)]" />
+              <div className="optical-sweep absolute inset-x-0 h-px bg-accent shadow-[0_0_14px_3px_rgba(123,208,255,0.75)]" />
             </div>
           )}
 
@@ -755,43 +778,45 @@ export default function OpticalScanner({ onScanComplete }: OpticalScannerProps) 
               <span
                 className={`rounded-lg border px-2 py-0.5 font-mono text-[10px] uppercase tracking-[0.14em] ${
                   result
-                    ? "border-[#4ade80]/40 bg-[#042f1a] text-[#4ade80]"
-                    : "border-[#45464d]/60 bg-[#040e20] text-[#909097]"
+                    ? "border-success/40 bg-success/10 text-success"
+                    : "border-line/60 bg-inset text-muted"
                 }`}
               >
-                {result ? result.format : "NO SIGNAL"}
+                {result ? result.format : t("terminal.noSignal")}
               </span>
             </div>
 
             <div className="space-y-1.5">
-              <p className="font-mono text-[10px] uppercase tracking-[0.2em] text-[#909097]">
-                Raw payload
+              <p className="font-mono text-[10px] uppercase tracking-[0.2em] text-muted">
+                {t("terminal.rawPayload")}
               </p>
               <p
                 className={`font-mono text-lg font-semibold leading-snug tracking-[0.06em] break-all ${
-                  result ? "text-[#7bd0ff]" : "text-[#45464d]"
+                  result ? "text-accent" : "text-faint"
                 }`}
               >
                 {payloadReadout}
               </p>
-              <p className="font-mono text-[11px] tracking-[0.06em] text-[#909097]">
-                {result ? formatTimestamp(new Date(result.timestamp)) : "————-——-—— ——:——:——"}
-              </p>
+              {result && (
+                <p className="font-mono text-[11px] tracking-[0.06em] text-muted">
+                  {formatTimestamp(new Date(result.timestamp))}
+                </p>
+              )}
             </div>
           </div>
         </div>
 
         {fault && (
-          <div className="flex items-start gap-3 rounded-xl border border-[#f87171]/40 bg-[#2a0f14] px-4 py-3">
+          <div className="flex items-start gap-3 rounded-xl border border-danger/40 bg-danger/10 px-4 py-3">
             <TriangleAlert
-              className="mt-0.5 h-4 w-4 shrink-0 text-[#f87171]"
+              className="mt-0.5 h-4 w-4 shrink-0 text-danger"
               aria-hidden="true"
             />
             <div className="min-w-0 space-y-1">
-              <p className="font-mono text-[11px] uppercase tracking-[0.14em] text-[#f87171]">
-                {fault.message}
+              <p className="font-mono text-[11px] uppercase tracking-[0.14em] text-danger">
+                {t(`terminal.fault.${fault.code}`)}
               </p>
-              <p className="font-mono text-[10px] leading-relaxed break-all text-[#909097]">
+              <p className="font-mono text-[10px] leading-relaxed break-all text-muted">
                 {fault.detail}
               </p>
             </div>
@@ -799,41 +824,70 @@ export default function OpticalScanner({ onScanComplete }: OpticalScannerProps) 
         )}
 
         {result && (
-          <div className="flex flex-col gap-3 rounded-xl border border-[#45464d]/50 bg-[#040e20] p-4">
-            <span className="inline-flex w-fit items-center gap-1.5 rounded-md border border-[#4ade80]/50 bg-[#042f1a] px-2.5 py-1 font-mono text-[10px] uppercase tracking-[0.14em] text-[#4ade80]">
+          <div className="flex flex-col gap-3 rounded-xl border border-line/50 bg-inset p-4">
+            <span className="inline-flex w-fit items-center gap-1.5 rounded-md border border-success/50 bg-success/10 px-2.5 py-1 font-mono text-[10px] uppercase tracking-[0.14em] text-success">
               <CircleCheck className="h-3.5 w-3.5" aria-hidden="true" />
-              Payload sealed to ledger
+              {t("terminal.sealed")}
             </span>
             <div className="grid grid-cols-2 gap-x-4 gap-y-3">
-              <ReadoutCell label="Format" value={result.format} />
+              <ReadoutCell label={t("terminal.format")} value={result.format} />
               <ReadoutCell
-                label="Source"
-                value={result.format === MANUAL_FORMAT ? "MANUAL ENTRY" : "CAMERA STREAM"}
+                label={t("terminal.source")}
+                value={
+                  result.format === MANUAL_FORMAT
+                    ? t("terminal.manualEntry")
+                    : t("terminal.cameraStream")
+                }
               />
               <ReadoutCell
-                label="Captured"
+                label={t("terminal.captured")}
                 value={formatTimestamp(new Date(result.timestamp))}
               />
-              <ReadoutCell label="Hardware ID" value={hardware} />
+              <ReadoutCell label={t("terminal.hardwareId")} value={hardware} />
             </div>
           </div>
         )}
 
         <div className="flex flex-col gap-2">
+          <button
+            type="button"
+            disabled={ocrBusy || phase === "requesting_permission"}
+            onClick={() => {
+              if (cameraLive && phase !== "scanned") {
+                void runOcrCapture();
+              } else {
+                manualInputRef.current?.focus();
+              }
+            }}
+            className="flex w-full items-center justify-center gap-2 rounded-xl bg-primary px-4 py-3 text-sm font-semibold text-white transition-colors hover:bg-primary-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-panel disabled:cursor-not-allowed disabled:opacity-70"
+          >
+            {ocrBusy ? (
+              <LoaderCircle className="h-4 w-4 animate-spin" aria-hidden="true" />
+            ) : (
+              <ScanLine className="h-4 w-4" aria-hidden="true" />
+            )}
+            {ocrBusy ? t("terminal.ocrBusy") : t("terminal.scanAction")}
+          </button>
+          {ocrMessage && (
+            <p className="font-mono text-[10px] uppercase leading-relaxed tracking-[0.14em] text-danger">
+              {ocrMessage}
+            </p>
+          )}
+
           {(phase === "idle" ||
             phase === "error" ||
             (phase === "scanned" && !cameraLive)) && (
             <button
               type="button"
               onClick={() => void startScanner()}
-              className="flex w-full items-center justify-center gap-2 rounded-xl bg-[#0053db] px-4 py-3 text-sm font-semibold text-white transition-colors hover:bg-[#0051d5] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#7bd0ff] focus-visible:ring-offset-2 focus-visible:ring-offset-[#152032] disabled:cursor-not-allowed disabled:opacity-70"
+              className="flex w-full items-center justify-center gap-2 rounded-xl bg-primary px-4 py-3 text-sm font-semibold text-white transition-colors hover:bg-primary-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-panel disabled:cursor-not-allowed disabled:opacity-70"
             >
               {phase === "error" ? (
                 <RotateCw className="h-4 w-4" aria-hidden="true" />
               ) : (
                 <Play className="h-4 w-4" aria-hidden="true" />
               )}
-              {phase === "error" ? "Retry Camera Access" : "Start Camera Scanner"}
+              {phase === "error" ? t("terminal.retryCamera") : t("terminal.startCamera")}
             </button>
           )}
 
@@ -841,10 +895,10 @@ export default function OpticalScanner({ onScanComplete }: OpticalScannerProps) 
             <button
               type="button"
               disabled
-              className="flex w-full cursor-wait items-center justify-center gap-2 rounded-xl bg-[#0053db] px-4 py-3 text-sm font-semibold text-white opacity-70"
+              className="flex w-full cursor-wait items-center justify-center gap-2 rounded-xl bg-primary px-4 py-3 text-sm font-semibold text-white opacity-70"
             >
               <LoaderCircle className="h-4 w-4 animate-spin" aria-hidden="true" />
-              Requesting Camera Access…
+              {t("terminal.requestingAccess")}
             </button>
           )}
 
@@ -854,21 +908,21 @@ export default function OpticalScanner({ onScanComplete }: OpticalScannerProps) 
                 <button
                   type="button"
                   onClick={resumeScanner}
-                  className="flex flex-1 items-center justify-center gap-2 rounded-xl bg-[#0053db] px-4 py-3 text-sm font-semibold text-white transition-colors hover:bg-[#0051d5] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#7bd0ff] focus-visible:ring-offset-2 focus-visible:ring-offset-[#152032]"
+                  className="flex flex-1 items-center justify-center gap-2 rounded-xl bg-primary px-4 py-3 text-sm font-semibold text-white transition-colors hover:bg-primary-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-panel"
                 >
                   <RotateCw className="h-4 w-4" aria-hidden="true" />
-                  Scan Next
+                  {t("terminal.scanNext")}
                 </button>
               )}
               <button
                 type="button"
                 onClick={() => void stopScanner()}
-                className={`flex items-center justify-center gap-2 rounded-xl border border-[#45464d] px-4 py-3 text-sm font-semibold text-white transition-colors hover:border-[#7bd0ff]/60 hover:text-[#7bd0ff] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#7bd0ff] focus-visible:ring-offset-2 focus-visible:ring-offset-[#152032] ${
+                className={`flex items-center justify-center gap-2 rounded-xl border border-line px-4 py-3 text-sm font-semibold text-ink transition-colors hover:border-accent/60 hover:text-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-panel ${
                   phase === "scanning" ? "w-full" : "flex-1"
                 }`}
               >
                 <Square className="h-4 w-4" aria-hidden="true" />
-                Stop Camera
+                {t("terminal.stopCamera")}
               </button>
             </div>
           )}
@@ -880,10 +934,10 @@ export default function OpticalScanner({ onScanComplete }: OpticalScannerProps) 
                   type="button"
                   onClick={() => void toggleTorch()}
                   aria-pressed={torchOn}
-                  className={`flex items-center justify-center gap-2 rounded-xl border px-3 py-2.5 font-mono text-[11px] uppercase tracking-[0.14em] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#7bd0ff] ${
+                  className={`flex items-center justify-center gap-2 rounded-xl border px-3 py-2.5 font-mono text-[11px] uppercase tracking-[0.14em] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent ${
                     torchOn
-                      ? "border-[#7bd0ff]/60 bg-[#040e20] text-[#7bd0ff]"
-                      : "border-[#45464d] text-[#909097] hover:border-[#7bd0ff]/50 hover:text-[#7bd0ff]"
+                      ? "border-accent/60 bg-inset text-accent"
+                      : "border-line text-muted hover:border-accent/50 hover:text-accent"
                   }`}
                 >
                   {torchOn ? (
@@ -891,21 +945,21 @@ export default function OpticalScanner({ onScanComplete }: OpticalScannerProps) 
                   ) : (
                     <Flashlight className="h-3.5 w-3.5" aria-hidden="true" />
                   )}
-                  {torchOn ? "Torch On" : "Toggle Flashlight"}
+                  {torchOn ? t("terminal.torchOn") : t("terminal.torchOff")}
                 </button>
               )}
               {cameras.length > 1 && (
                 <button
                   type="button"
                   onClick={() => void switchCamera()}
-                  className={`flex items-center justify-center gap-2 rounded-xl border px-3 py-2.5 font-mono text-[11px] uppercase tracking-[0.14em] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#7bd0ff] ${
+                  className={`flex items-center justify-center gap-2 rounded-xl border px-3 py-2.5 font-mono text-[11px] uppercase tracking-[0.14em] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent ${
                     torchSupported
-                      ? "border-[#45464d] text-[#909097] hover:border-[#7bd0ff]/50 hover:text-[#7bd0ff]"
-                      : "col-span-2 border-[#45464d] text-[#909097] hover:border-[#7bd0ff]/50 hover:text-[#7bd0ff]"
+                      ? "border-line text-muted hover:border-accent/50 hover:text-accent"
+                      : "col-span-2 border-line text-muted hover:border-accent/50 hover:text-accent"
                   }`}
                 >
                   <SwitchCamera className="h-3.5 w-3.5" aria-hidden="true" />
-                  Switch Camera
+                  {t("terminal.switchCamera")}
                 </button>
               )}
             </div>
@@ -916,42 +970,44 @@ export default function OpticalScanner({ onScanComplete }: OpticalScannerProps) 
           <div className="flex items-center justify-between gap-3">
             <label
               htmlFor="optical-manual-serial"
-              className="flex items-center gap-2 font-mono text-[10px] uppercase tracking-[0.18em] text-[#909097]"
+              className="flex items-center gap-2 font-mono text-[10px] uppercase tracking-[0.18em] text-muted"
             >
               <Keyboard className="h-3.5 w-3.5" aria-hidden="true" />
-              Manual fallback
+              {t("terminal.manualFallback")}
             </label>
-            <span className="font-mono text-[10px] uppercase tracking-[0.14em] text-[#45464d]">
-              Camera unavailable
+            <span className="font-mono text-[10px] uppercase tracking-[0.14em] text-faint">
+              {t("terminal.cameraUnavailable")}
             </span>
           </div>
           <div className="flex gap-2">
             <input
               id="optical-manual-serial"
+              ref={manualInputRef}
               type="text"
               value={manualValue}
               onChange={(event) => setManualValue(event.target.value)}
-              placeholder="SN-HW-••••••"
+              placeholder={t("terminal.ready")}
               autoComplete="off"
               spellCheck={false}
-              className="min-w-0 flex-1 rounded-xl border border-[#45464d]/60 bg-[#040e20] px-3 py-2.5 font-mono text-xs tracking-[0.06em] text-white placeholder:text-[#909097] focus:border-[#7bd0ff]/60 focus:outline-none focus:ring-1 focus:ring-[#7bd0ff]/50"
+              aria-label={t("terminal.manualLabel")}
+              className="min-w-0 flex-1 rounded-xl border border-line/60 bg-inset px-3 py-2.5 font-mono text-xs tracking-[0.06em] text-ink placeholder:text-muted focus:border-accent/60 focus:outline-none focus:ring-1 focus:ring-accent/50"
             />
             <button
               type="submit"
               disabled={manualValue.trim().length === 0}
-              className="shrink-0 rounded-xl border border-[#45464d] px-4 py-2.5 font-mono text-[11px] uppercase tracking-[0.14em] text-white transition-colors hover:border-[#7bd0ff]/60 hover:text-[#7bd0ff] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#7bd0ff] focus-visible:ring-offset-2 focus-visible:ring-offset-[#152032] disabled:cursor-not-allowed disabled:opacity-50"
+              className="shrink-0 rounded-xl border border-line px-4 py-2.5 font-mono text-[11px] uppercase tracking-[0.14em] text-ink transition-colors hover:border-accent/60 hover:text-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-panel disabled:cursor-not-allowed disabled:opacity-50"
             >
-              Commit
+              {t("terminal.commit")}
             </button>
           </div>
         </form>
 
-        <p className="font-mono text-[10px] uppercase leading-relaxed tracking-[0.14em] text-[#909097]">
+        <p className="font-mono text-[10px] uppercase leading-relaxed tracking-[0.14em] text-muted">
           {phase === "scanning"
-            ? "Align QR or 1D/2D barcode inside the reticle • Decoder armed"
+            ? t("terminal.hintScanning")
             : phase === "scanned"
-              ? "Ledger row committed • Camera held on last frame"
-              : "Camera stream stays on device • https or localhost required"}
+              ? t("terminal.hintScanned")
+              : t("terminal.hintIdle")}
         </p>
       </div>
     </section>
