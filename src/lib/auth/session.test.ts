@@ -28,6 +28,7 @@ import {
   requireRole,
   requireUser,
 } from "./session";
+import { SupabaseConfigError } from "@/lib/supabase/env";
 
 function supabaseUser(overrides: Record<string, unknown> = {}): SupabaseUser {
   return {
@@ -79,12 +80,26 @@ describe("getAuthUser", () => {
     expect(await getAuthUser()).toBeNull();
   });
 
-  it("returns null when the client cannot be created (missing config)", async () => {
+  it("surfaces configuration errors instead of reporting a signed-out visitor", async () => {
     const { createServerSupabaseClient } = await import("@/lib/supabase/server");
     vi.mocked(createServerSupabaseClient).mockRejectedValueOnce(
-      new Error("Supabase is not configured"),
+      new SupabaseConfigError(
+        "Set the missing environment variable(s): NEXT_PUBLIC_SUPABASE_URL.",
+      ),
     );
-    expect(await getAuthUser()).toBeNull();
+    // A misconfigured environment must fail loudly (500 + log), never as a
+    // silent 401 that looks like an expired session.
+    await expect(getAuthUser()).rejects.toBeInstanceOf(SupabaseConfigError);
+  });
+
+  it("propagates configuration errors through requireUser", async () => {
+    const { createServerSupabaseClient } = await import("@/lib/supabase/server");
+    vi.mocked(createServerSupabaseClient).mockRejectedValueOnce(
+      new SupabaseConfigError(
+        "Set the missing environment variable(s): NEXT_PUBLIC_SUPABASE_ANON_KEY.",
+      ),
+    );
+    await expect(requireUser()).rejects.toBeInstanceOf(SupabaseConfigError);
   });
 });
 

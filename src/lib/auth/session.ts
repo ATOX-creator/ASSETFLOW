@@ -13,10 +13,15 @@ export { LEGACY_SESSION_COOKIE, safeNextPath } from "./redirect";
  * `supabase.auth.getUser()` verifies the session token against Supabase, so
  * the result is a server-verified identity — never a value supplied by the
  * browser. Returns `null` for anonymous requests.
+ *
+ * Client construction happens outside the `try`: building the client only
+ * reads configuration, so a failure there (missing/invalid `NEXT_PUBLIC_*`
+ * values) must surface as a configuration error — never be swallowed into a
+ * `null` session that callers would report as 401.
  */
 export async function getAuthUser(): Promise<SupabaseUser | null> {
+  const supabase = await createServerSupabaseClient();
   try {
-    const supabase = await createServerSupabaseClient();
     const { data, error } = await supabase.auth.getUser();
     if (error || !data.user) {
       return null;
