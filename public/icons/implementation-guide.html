@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Favicon Implementation Guide</title>
+  <style>
+    body { font-family: Arial, sans-serif; max-width: 800px; margin: 0 auto; padding: 20px; }
+    code { background: #f5f5f5; padding: 2px 4px; border-radius: 3px; }
+    pre { background: #f5f5f5; padding: 15px; border-radius: 5px; overflow-x: auto; }
+    h2 { color: #333; border-bottom: 2px solid #eee; padding-bottom: 10px; }
+  </style>
+</head>
+<body>
+  <h1>Favicon Implementation Guide</h1>
+  
+  <h2>1. Upload Files</h2>
+  <p>Upload all PNG files to your website's root directory (same level as index.html).</p>
+  
+  <h2>2. Add to HTML Head</h2>
+  <p>Add these lines to the <code>&lt;head&gt;</code> section of your HTML:</p>
+  <pre><code>&lt;!-- Modern SVG favicon (preferred) --&gt;
+&lt;link rel="icon" type="image/svg+xml" href="/favicon.svg"&gt;
+
+&lt;!-- Classic ICO favicon (broad compatibility) --&gt;
+&lt;link rel="icon" type="image/x-icon" href="/favicon.ico"&gt;
+
+&lt;!-- Fallback PNG favicons --&gt;
+&lt;link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png"&gt;
+&lt;link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png"&gt;
+
+&lt;!-- Apple Touch Icons --&gt;
+&lt;link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png"&gt;
+&lt;link rel="apple-touch-icon" sizes="152x152" href="/apple-touch-icon-152x152.png"&gt;
+&lt;link rel="apple-touch-icon" sizes="144x144" href="/apple-touch-icon-144x144.png"&gt;
+&lt;link rel="apple-touch-icon" sizes="120x120" href="/apple-touch-icon-120x120.png"&gt;
+
+&lt;!-- Android Chrome --&gt;
+&lt;link rel="icon" type="image/png" sizes="192x192" href="/android-chrome-192x192.png"&gt;
+
+&lt;!-- Theme color (matches the manifest) --&gt;
+&lt;meta name="theme-color" content="#ffffff"&gt;
+
+&lt;!-- Web App Manifest --&gt;
+&lt;link rel="manifest" href="/manifest.json"&gt;</code></pre>
+  <p>Maskable and monochrome icons are <strong>not</strong> referenced with <code>&lt;link&gt;</code> tags — they are declared in <code>manifest.json</code> only.</p>
+
+  <h2>3. For PWA Support</h2>
+  <p>The included <code>manifest.json</code> enables Progressive Web App features and already declares every icon purpose Android needs. Customize the app name, <code>start_url</code>, <code>scope</code> and colors as needed.</p>
+  <pre><code>{
+  "id": "/",
+  "name": "A",
+  "short_name": "A",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "theme_color": "#ffffff",
+  "background_color": "#ffffff",
+  "icons": [
+    { "src": "/android-chrome-192x192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/android-chrome-512x512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "/icon-192-maskable.png", "sizes": "192x192", "type": "image/png", "purpose": "maskable" },
+    { "src": "/icon-512-maskable.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" },
+    { "src": "/icon-monochrome-432.png", "sizes": "432x432", "type": "image/png", "purpose": "monochrome" }
+  ]
+}</code></pre>
+  <ul>
+    <li><strong>purpose: "any"</strong> - the plain icon, shown as-is by browsers and desktop installs.</li>
+    <li><strong>purpose: "maskable"</strong> - full-bleed icon for Android adaptive icons. The artwork sits inside the safe zone (the centre 80% circle) so it is never clipped by the launcher mask.</li>
+    <li><strong>purpose: "monochrome"</strong> - white silhouette on transparency, used by Android 13+ themed (dynamic color) icons. Android tints it with the user's wallpaper palette.</li>
+  </ul>
+  <p>Keep the purposes in separate entries. Combining them (<code>"purpose": "any maskable"</code>) makes the padded icon appear in places that do not mask it.</p>
+
+  <h2>4. File List</h2>
+  <ul>
+    <li><strong>favicon.svg</strong> - Modern SVG favicon (scalable, preferred)</li>
+    <li><strong>favicon.ico</strong> - Classic ICO favicon (maximum compatibility)</li>
+    <li><strong>favicon-16x16.png</strong> - 16×16 favicon (fallback)</li>
+    <li><strong>favicon-32x32.png</strong> - 32×32 favicon (fallback)</li>
+    <li><strong>favicon-48x48.png</strong> - 48×48 favicon</li>
+    <li><strong>favicon-96x96.png</strong> - 96×96 favicon</li>
+    <li><strong>apple-touch-icon.png</strong> - 180×180 Apple touch icon</li>
+    <li><strong>apple-touch-icon-152x152.png</strong> - 152×152 Apple touch icon</li>
+    <li><strong>apple-touch-icon-144x144.png</strong> - 144×144 Apple touch icon</li>
+    <li><strong>apple-touch-icon-120x120.png</strong> - 120×120 Apple touch icon</li>
+    <li><strong>android-chrome-192x192.png</strong> - 192×192 Android Chrome icon</li>
+    <li><strong>android-chrome-512x512.png</strong> - 512×512 Android Chrome icon</li>
+    <li><strong>icon-192-maskable.png</strong> - 192×192 maskable icon (safe-zone padded, full-bleed background)</li>
+    <li><strong>icon-512-maskable.png</strong> - 512×512 maskable icon (safe-zone padded, full-bleed background)</li>
+    <li><strong>icon-monochrome-432.png</strong> - 432×432 monochrome icon for Android 13+ themed icons</li>
+    <li><strong>manifest.json</strong> - PWA manifest file</li>
+    <li><strong>implementation-guide.html</strong> - this guide</li>
+  </ul>
+
+  <h2>5. SVG Favicon Benefits</h2>
+  <p>The SVG favicon (<code>favicon.svg</code>) is the modern standard and offers several advantages:</p>
+  <ul>
+    <li><strong>Scalable</strong> - Looks crisp at any size</li>
+    <li><strong>Smaller file size</strong> - Often smaller than multiple PNG files</li>
+    <li><strong>Future-proof</strong> - Supported by all modern browsers</li>
+    <li><strong>Dark mode support</strong> - Can include CSS for automatic dark/light theme switching</li>
+  </ul>
+</body>
+</html>

@@ -6,6 +6,7 @@ import {
   authQueryErrorKey,
   hasActiveSession,
   requestPasswordReset,
+  resendConfirmationEmail,
   signInWithEmail,
   signUpWithEmail,
   startGoogleSignIn,
@@ -19,6 +20,7 @@ function createMockClient() {
       signUp: vi.fn(),
       signInWithOAuth: vi.fn(),
       resetPasswordForEmail: vi.fn(),
+      resend: vi.fn(),
       updateUser: vi.fn(),
       getSession: vi.fn(),
     },
@@ -186,6 +188,70 @@ describe("signUpWithEmail", () => {
     );
     expect(result.ok).toBe(false);
     expect(result.messageKey).toBe("auth.accountExists");
+  });
+});
+
+describe("resendConfirmationEmail", () => {
+  it("re-sends the sign-up confirmation with a safe redirect", async () => {
+    const mock = createMockClient();
+    mock.auth.resend.mockResolvedValue({ data: {}, error: null });
+
+    const result = await resendConfirmationEmail(" jane@company.com ", client(mock));
+
+    expect(result).toEqual({ ok: true, messageKey: "auth.resendSent" });
+    expect(mock.auth.resend).toHaveBeenCalledWith({
+      type: "signup",
+      email: "jane@company.com",
+      options: { emailRedirectTo: expect.stringContaining("/auth/callback") },
+    });
+  });
+
+  it("answers exactly the same for an address with no account", async () => {
+    const mock = createMockClient();
+    mock.auth.resend.mockResolvedValue({
+      data: {},
+      error: { code: "user_not_found", message: "no such user" },
+    });
+
+    const result = await resendConfirmationEmail("nobody@company.com", client(mock));
+
+    expect(result).toEqual({ ok: true, messageKey: "auth.resendSent" });
+    expect(JSON.stringify(result)).not.toContain("no such user");
+  });
+
+  it("reports rate limiting as a failure", async () => {
+    const mock = createMockClient();
+    mock.auth.resend.mockResolvedValue({
+      data: {},
+      error: { code: "over_email_send_rate_limit", message: "wait" },
+    });
+
+    const result = await resendConfirmationEmail("jane@company.com", client(mock));
+
+    expect(result).toEqual({ ok: false, messageKey: "auth.rateLimited" });
+  });
+
+  it("never claims the mail was sent when delivery failed", async () => {
+    const mock = createMockClient();
+    mock.auth.resend.mockResolvedValue({
+      data: {},
+      error: { code: "email_send_failed", message: "smtp unavailable" },
+    });
+
+    const result = await resendConfirmationEmail("jane@company.com", client(mock));
+
+    expect(result.ok).toBe(false);
+    expect(result.messageKey).toBe("auth.genericError");
+    expect(JSON.stringify(result)).not.toContain("smtp unavailable");
+  });
+
+  it("maps network failures thrown by the client", async () => {
+    const mock = createMockClient();
+    mock.auth.resend.mockRejectedValue(new TypeError("Failed to fetch"));
+
+    const result = await resendConfirmationEmail("jane@company.com", client(mock));
+
+    expect(result).toEqual({ ok: false, messageKey: "auth.networkError" });
   });
 });
 

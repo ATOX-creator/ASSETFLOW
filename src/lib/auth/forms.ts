@@ -141,6 +141,35 @@ export async function signUpWithEmail(
 }
 
 /**
+ * Re-sends the sign-up confirmation e-mail for an address.
+ *
+ * Enumeration-safe by construction: an unknown address is reported exactly
+ * like a successful send, so the caller cannot probe for existing accounts.
+ * Delivery and rate-limit failures raised by the provider are still surfaced.
+ */
+export async function resendConfirmationEmail(
+  email: string,
+  client: SupabaseClient = createBrowserSupabaseClient(),
+): Promise<AuthResult> {
+  try {
+    const { error } = await client.auth.resend({
+      type: "signup",
+      email: email.trim(),
+      options: { emailRedirectTo: authCallbackUrl(DEFAULT_AUTH_DESTINATION) },
+    });
+    if (error) {
+      if ((error.code ?? "").toLowerCase() === "user_not_found") {
+        return { ok: true, messageKey: "auth.resendSent" };
+      }
+      return { ok: false, messageKey: authErrorKey(error.code, error.message) };
+    }
+    return { ok: true, messageKey: "auth.resendSent" };
+  } catch (error) {
+    return { ok: false, messageKey: authErrorKey(undefined, String(error)) };
+  }
+}
+
+/**
  * Starts password recovery.
  *
  * The result is deliberately generic: callers must show the same success copy

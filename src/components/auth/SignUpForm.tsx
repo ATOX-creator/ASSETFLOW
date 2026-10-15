@@ -1,16 +1,83 @@
 "use client";
 
-import { useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { ArrowLeft, ArrowRight, CircleCheck, LoaderCircle } from "lucide-react";
+import { ArrowLeft, ArrowRight, CircleCheck, LoaderCircle, Mail } from "lucide-react";
 import { useApp } from "@/lib/i18n";
-import { signUpWithEmail, startGoogleSignIn } from "@/lib/auth/forms";
+import { resendConfirmationEmail, signUpWithEmail, startGoogleSignIn } from "@/lib/auth/forms";
 import { safeNextPath } from "@/lib/auth/redirect";
-import { validateSignUp, type FieldErrors } from "./validation";
+import { type FieldErrors } from "./validation";
+import {
+  runSignUp,
+  submitButtonModel,
+  type SignUpBusy,
+  type SignUpField,
+} from "./signupFlow";
 import AuthShell from "./AuthShell";
 import PasswordField from "./PasswordField";
 import GoogleButton from "./GoogleButton";
+
+/**
+ * "Resend confirmation e-mail" action, shared by the success dialog and the
+ * pending-confirmation panel. The response copy is enumeration-safe: an
+ * unknown address answers exactly like a delivered one.
+ */
+function ResendConfirmationButton({ email }: { email: string }) {
+  const { t } = useApp();
+  const [busy, setBusy] = useState(false);
+  const [status, setStatus] = useState<{ tone: "ok" | "error"; messageKey: string } | null>(
+    null,
+  );
+
+  const resend = async () => {
+    if (busy) {
+      return;
+    }
+    setBusy(true);
+    setStatus(null);
+    try {
+      const result = await resendConfirmationEmail(email);
+      setStatus(
+        result.ok
+          ? { tone: "ok", messageKey: result.messageKey ?? "auth.resendSent" }
+          : { tone: "error", messageKey: result.messageKey ?? "auth.genericError" },
+      );
+    } catch {
+      setStatus({ tone: "error", messageKey: "auth.networkError" });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="mt-4 text-center">
+      <button
+        type="button"
+        onClick={() => void resend()}
+        disabled={busy}
+        className="btn-ghost w-full"
+      >
+        {busy ? (
+          <LoaderCircle className="h-4 w-4 animate-spin" aria-hidden="true" />
+        ) : (
+          <Mail className="h-4 w-4" aria-hidden="true" />
+        )}
+        {busy ? t("auth.resendingConfirmation") : t("auth.resendConfirmation")}
+      </button>
+      {status ? (
+        <p
+          role={status.tone === "error" ? "alert" : "status"}
+          className={`mt-2 text-xs leading-relaxed ${
+            status.tone === "error" ? "text-danger" : "text-muted"
+          }`}
+        >
+          {t(status.messageKey)}
+        </p>
+      ) : null}
+    </div>
+  );
+}
 
 /**
  * Sign-up screen: name, email, password, and confirmation.
@@ -18,6 +85,11 @@ import GoogleButton from "./GoogleButton";
  * Account creation goes through Supabase Auth; the profile that appears in
  * the application is created server-side on first sign-in and always as a
  * regular member — no role is ever sent from this form.
+ *
+ * When the project requires e-mail confirmation, a "Check your email" dialog
+ * announces the pending verification (showing the address that was submitted)
+ * and hands over to a confirmation panel with a resend action. No session is
+ * created before Supabase has verified the account.
  */
 export default function SignUpForm() {
   const { t, refreshUser } = useApp();
@@ -27,45 +99,94 @@ export default function SignUpForm() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
-  const [errors, setErrors] = useState<FieldErrors<
-    "name" | "email" | "password" | "confirmPassword"
-  >>({});
+  const [errors, setErrors] = useState<FieldErrors<SignUpField>>({});
   const [formError, setFormError] = useState<string | null>(null);
-  const [busy, setBusy] = useState<"password" | "google" | null>(null);
+  const [busy, setBusy] = useState<SignUpBusy>(null);
   const [confirmationEmail, setConfirmationEmail] = useState<string | null>(null);
+  const [dialogOpen, setDialogOpen] = useState(false);
+
+  /** Synchronous guard: two submits in the same tick must not both fire. */
+  const submittingRef = useRef(false);
+  const dialogRef = useRef<HTMLDivElement>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
+
+  const dialogVisible = dialogOpen && confirmationEmail !== null;
+  const showPendingPanel = confirmationEmail !== null && !dialogVisible;
+
+  const dismissDialog = useCallback(() => {
+    setDialogOpen(false);
+  }, []);
+
+  useEffect(() => {
+    if (dialogVisible) {
+      dialogRef.current?.focus();
+    }
+  }, [dialogVisible]);
+
+  useEffect(() => {
+    if (!dialogVisible) {
+      return;
+    }
+    const onKeyDown = (event: KeyboardEvent): void => {
+      if (event.key === "Escape") {
+        dismissDialog();
+      }
+    };
+    document.addEventListener("keydown", onKeyDown);
+    return () => document.removeEventListener("keydown", onKeyDown);
+  }, [dialogVisible, dismissDialog]);
+
+  useEffect(() => {
+    if (showPendingPanel) {
+      panelRef.current?.focus();
+    }
+  }, [showPendingPanel]);
 
   const submit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    if (busy) {
+    if (busy || submittingRef.current) {
       return;
     }
-    const found = validateSignUp({ name, email, password, confirmPassword });
-    setErrors(found);
     setFormError(null);
-    if (Object.keys(found).length > 0) {
-      return;
-    }
-
     setBusy("password");
+    submittingRef.current = true;
+    let keepBusy = false;
     try {
-      const result = await signUpWithEmail({ name, email, password });
-      if (!result.ok) {
-        setFormError(result.messageKey ?? "auth.genericError");
-        setBusy(null);
-        return;
-      }
-      if (result.needsConfirmation) {
-        setConfirmationEmail(email.trim());
-        setBusy(null);
-        return;
+      const outcome = await runSignUp(
+        { name, email, password, confirmPassword },
+        { busy: busy !== null, signUp: signUpWithEmail },
+      );
+      switch (outcome.kind) {
+        case "ignored":
+          return;
+        case "invalid":
+          setErrors(outcome.errors);
+          return;
+        case "failed":
+          setErrors({});
+          setFormError(outcome.messageKey);
+          return;
+        case "needs-confirmation":
+          setErrors({});
+          setConfirmationEmail(outcome.email);
+          setDialogOpen(true);
+          return;
+        default:
+          break;
       }
       // Confirmation is disabled on the project: the session already exists.
+      setErrors({});
+      keepBusy = true;
       await refreshUser();
       router.replace(safeNextPath(null));
       router.refresh();
     } catch {
       setFormError("auth.networkError");
-      setBusy(null);
+    } finally {
+      submittingRef.current = false;
+      if (!keepBusy) {
+        setBusy(null);
+      }
     }
   };
 
@@ -87,12 +208,18 @@ export default function SignUpForm() {
     }
   };
 
+  const button = submitButtonModel(busy);
   const disabled = busy !== null;
 
-  if (confirmationEmail) {
+  if (showPendingPanel && confirmationEmail) {
     return (
       <AuthShell title={t("auth.checkEmailTitle")} hint={t("auth.signUpTitle")}>
-        <div className="panel p-5 text-center sm:p-6" role="status">
+        <div
+          ref={panelRef}
+          tabIndex={-1}
+          className="panel p-5 text-center focus:outline-none sm:p-6"
+          role="status"
+        >
           <span className="mx-auto mb-4 grid h-11 w-11 place-items-center rounded-2xl border border-success/40 bg-success/10 text-success">
             <CircleCheck className="h-5 w-5" aria-hidden="true" />
           </span>
@@ -100,7 +227,8 @@ export default function SignUpForm() {
           <p className="mt-2 text-xs leading-relaxed text-muted">
             {t("auth.checkEmailBody", { email: confirmationEmail })}
           </p>
-          <Link href="/login" className="btn-ghost mt-5 w-full">
+          <ResendConfirmationButton email={confirmationEmail} />
+          <Link href="/login" className="btn-ghost mt-4 w-full">
             <ArrowLeft className="h-4 w-4" aria-hidden="true" />
             {t("auth.backToSignIn")}
           </Link>
@@ -199,13 +327,13 @@ export default function SignUpForm() {
           {t("auth.passwordHint")}
         </p>
 
-        <button type="submit" disabled={disabled} className="btn-primary mt-5 w-full">
-          {busy === "password" ? (
+        <button type="submit" disabled={button.disabled} className="btn-primary mt-5 w-full">
+          {button.showSpinner ? (
             <LoaderCircle className="h-4 w-4 animate-spin" aria-hidden="true" />
           ) : (
             <ArrowRight className="h-4 w-4" aria-hidden="true" />
           )}
-          {busy === "password" ? t("auth.creatingAccount") : t("auth.createAccount")}
+          {t(button.labelKey)}
         </button>
 
         <div className="my-4 flex items-center gap-3" aria-hidden="true">
@@ -232,6 +360,47 @@ export default function SignUpForm() {
           </Link>
         </p>
       </form>
+
+      {dialogVisible && confirmationEmail ? (
+        <div
+          className="fixed inset-0 z-[110] flex items-end justify-center bg-black/50 p-0 sm:items-center sm:p-6"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) {
+              dismissDialog();
+            }
+          }}
+        >
+          <div
+            ref={dialogRef}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="signup-confirm-title"
+            aria-describedby="signup-confirm-body"
+            tabIndex={-1}
+            className="w-full max-w-md rounded-t-2xl border border-line/50 bg-panel p-5 text-ink shadow-2xl focus:outline-none sm:rounded-3xl sm:p-6"
+          >
+            <span className="mx-auto grid h-11 w-11 place-items-center rounded-2xl border border-success/40 bg-success/10 text-success">
+              <CircleCheck className="h-5 w-5" aria-hidden="true" />
+            </span>
+            <h2
+              id="signup-confirm-title"
+              className="mt-4 text-center text-base font-semibold text-ink"
+            >
+              {t("auth.checkEmailTitle")}
+            </h2>
+            <p
+              id="signup-confirm-body"
+              className="mt-2 text-center text-sm leading-relaxed text-muted"
+            >
+              {t("auth.confirmEmailDialogBody", { email: confirmationEmail })}
+            </p>
+            <ResendConfirmationButton email={confirmationEmail} />
+            <button type="button" onClick={dismissDialog} className="btn-primary mt-5 w-full">
+              {t("auth.gotIt")}
+            </button>
+          </div>
+        </div>
+      ) : null}
     </AuthShell>
   );
 }

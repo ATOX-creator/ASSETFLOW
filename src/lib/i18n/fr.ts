@@ -114,6 +114,13 @@ const fr: Dictionary = {
     checkEmailTitle: "Vérifiez votre e-mail",
     checkEmailBody:
       "Nous avons envoyé un lien de confirmation à {email}. Vérifiez votre adresse pour terminer la création de votre compte, puis connectez-vous.",
+    confirmEmailDialogBody:
+      "Pour continuer, veuillez confirmer votre adresse e-mail. Un e-mail de confirmation a été envoyé à {email}. Cliquez sur le lien qu'il contient pour activer votre compte Assetflow.",
+    resendConfirmation: "Renvoyer l'e-mail de confirmation",
+    resendingConfirmation: "Envoi…",
+    resendSent:
+      "Si un compte existe pour cette adresse, un nouvel e-mail de confirmation est en route.",
+    gotIt: "J'ai compris",
     resetSentTitle: "Vérifiez votre e-mail",
     resetSentBody:
       "Si un compte existe pour cette adresse, un lien de réinitialisation est en route. Il expire bientôt.",

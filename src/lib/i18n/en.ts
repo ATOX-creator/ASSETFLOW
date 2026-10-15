@@ -112,6 +112,12 @@ const en = {
     checkEmailTitle: "Check your email",
     checkEmailBody:
       "We sent a confirmation link to {email}. Verify your address to finish creating your account, then sign in.",
+    confirmEmailDialogBody:
+      "To continue, please confirm your email address. A confirmation email was sent to {email}. Click the link in that email to activate your Assetflow account.",
+    resendConfirmation: "Resend confirmation email",
+    resendingConfirmation: "Sending…",
+    resendSent: "If an account exists for that address, a new confirmation email is on its way.",
+    gotIt: "Got it",
     resetSentTitle: "Check your email",
     resetSentBody:
       "If an account exists for that address, a password reset link is on its way. The link expires shortly.",
