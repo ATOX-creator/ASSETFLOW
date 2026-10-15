@@ -180,10 +180,11 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
         <div className="flex items-center gap-3 border-b border-line/40 px-4 py-4">
             <span className="grid h-10 w-10 shrink-0 place-items-center overflow-hidden rounded-2xl border border-accent/40 bg-accent-soft">
               <Image
-                src="/main-logo.png"
+                src="/main-logo.svg"
                 alt=""
                 width={40}
                 height={40}
+                unoptimized
                 className="h-full w-full object-cover"
               />
             </span>

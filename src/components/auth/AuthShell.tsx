@@ -29,10 +29,11 @@ export default function AuthShell({ title, hint, children, footer }: AuthShellPr
           <div className="flex items-center gap-3">
             <span className="grid h-10 w-10 place-items-center overflow-hidden rounded-2xl border border-accent/40 bg-accent-soft">
               <Image
-                src="/main-logo.png"
+                src="/main-logo.svg"
                 alt=""
                 width={40}
                 height={40}
+                unoptimized
                 className="h-full w-full object-cover"
               />
             </span>
