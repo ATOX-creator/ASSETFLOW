@@ -88,7 +88,18 @@ describe("path classifiers", () => {
     expect(isStaticAssetPath("/manifest.webmanifest")).toBe(true);
   });
 
-  it("recognises the icon manifest as a static asset (existing behavior)", () => {
+  it("allowlists exactly the manifest pathname and nothing else", () => {
+    expect(isStaticAssetPath("/manifest.webmanifest.bak")).toBe(false);
+    expect(isStaticAssetPath("/manifest.webmanifest/../dashboard")).toBe(false);
+    expect(isStaticAssetPath("/manifest.json")).toBe(false);
     expect(isStaticAssetPath("/icons/manifest.json")).toBe(false);
+  });
+
+  it("keeps protected routes protected alongside the manifest allowlist", () => {
+    expect(isStaticAssetPath("/manifest.webmanifest")).toBe(true);
+    expect(isStaticAssetPath("/dashboard")).toBe(false);
+    expect(isStaticAssetPath("/assets")).toBe(false);
+    expect(isStaticAssetPath("/api/assets")).toBe(false);
+    expect(isAuthPublicPath("/manifest.webmanifest")).toBe(false);
   });
 });

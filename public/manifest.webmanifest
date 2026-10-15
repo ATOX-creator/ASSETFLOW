@@ -1,4 +1,4 @@
-﻿{
+{
   "id": "/",
   "name": "Assetflow",
   "short_name": "Assetflow",
@@ -31,12 +31,6 @@
       "sizes": "512x512",
       "type": "image/png",
       "purpose": "maskable"
-    },
-    {
-      "src": "/icons/icon-monochrome-432.png",
-      "sizes": "432x432",
-      "type": "image/png",
-      "purpose": "monochrome"
     }
   ]
 }
