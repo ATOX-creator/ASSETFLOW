@@ -84,4 +84,11 @@ describe("path classifiers", () => {
     expect(isStaticAssetPath("/splash.mp4")).toBe(true);
     expect(isStaticAssetPath("/dashboard")).toBe(false);
   });
+  it("recognises the web manifest as a static asset", () => {
+    expect(isStaticAssetPath("/manifest.webmanifest")).toBe(true);
+  });
+
+  it("recognises the icon manifest as a static asset (existing behavior)", () => {
+    expect(isStaticAssetPath("/icons/manifest.json")).toBe(false);
+  });
 });

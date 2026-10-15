@@ -23,7 +23,7 @@ export const DEFAULT_AUTH_DESTINATION = "/dashboard";
 
 /**
  * Legacy cookie minted by the removed mock/HMAC session signer. It is no
- * longer read by anything — it is actively cleared so an old cookie can never
+ * longer read by anything â€” it is actively cleared so an old cookie can never
  * be mistaken for a session.
  */
 export const LEGACY_SESSION_COOKIE = "af_session";
@@ -99,7 +99,7 @@ export function isSignedInHiddenPath(pathname: string): boolean {
 
 /** Static files that never need a session check. */
 export function isStaticAssetPath(pathname: string): boolean {
-  if (pathname.startsWith("/_next") || pathname.startsWith("/favicon")) {
+  if (pathname.startsWith("/_next") || pathname.startsWith("/favicon") || pathname.startsWith("/manifest.webmanifest")) {
     return true;
   }
   return /\.(?:svg|png|jpe?g|ico|webp|avif|mp4|webm|txt|map|css|js|woff2?)$/i.test(
