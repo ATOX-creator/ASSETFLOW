@@ -27,7 +27,7 @@ export const metadata: Metadata = {
     { rel: "icon", url: "/icons/favicon-32x32.png", sizes: "32x32", type: "image/png" },
     { rel: "icon", url: "/icons/favicon-48x48.png", sizes: "48x48", type: "image/png" },
     { rel: "icon", url: "/icons/favicon-96x96.png", sizes: "96x96", type: "image/png" },
-    { rel: "icon", url: "/favicon.ico", sizes: "any", type: "image/x-icon" },
+    { rel: "icon", url: "/icons/favicon.ico", sizes: "any", type: "image/x-icon" },
     { rel: "icon", url: "/icons/favicon.svg", type: "image/svg+xml" },
     { rel: "apple-touch-icon", url: "/icons/apple-touch-icon-120x120.png", sizes: "120x120" },
     { rel: "apple-touch-icon", url: "/icons/apple-touch-icon-144x144.png", sizes: "144x144" },
