@@ -2,7 +2,6 @@ import { localRepository } from "./local";
 import type { Repository } from "./types";
 
 export type * from "./types";
-export { SEED_USERS } from "./seed";
 
 /**
  * Single entry point for all persistence.

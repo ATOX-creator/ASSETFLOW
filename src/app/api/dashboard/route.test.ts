@@ -88,6 +88,20 @@ beforeEach(() => {
 });
 
 describe("GET /api/dashboard", () => {
+  it("returns successful repository-derived empty results for an empty store", async () => {
+    mocks.state.assets = [];
+    mocks.state.logs = [];
+
+    const response = await GET();
+    expect(response.status).toBe(200);
+    const payload = (await response.json()) as DashboardResponse;
+    expect(payload.total).toBe(0);
+    expect(payload.byStatus).toEqual([]);
+    expect(payload.byCategory).toEqual([]);
+    expect(payload.byCategoryStatus).toEqual([]);
+    expect(payload.recent).toEqual([]);
+  });
+
   it("derives totals from assets, not scan logs", async () => {
     const response = await GET();
     expect(response.status).toBe(200);

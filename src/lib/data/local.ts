@@ -1,6 +1,5 @@
 import fs from "node:fs";
 import path from "node:path";
-import { createSeedDatabase } from "./seed";
 import { upsertUserRecord } from "./users";
 import type {
   AssetFilter,
@@ -23,37 +22,81 @@ declare global {
   var __assetflowDatabase: DatabaseSchema | undefined;
 }
 
-function persist(database: DatabaseSchema): void {
+export function createEmptyDatabase(): DatabaseSchema {
+  return {
+    version: 1,
+    users: [],
+    assets: [],
+    logs: [],
+    preferences: [],
+    scanEvents: [],
+  };
+}
+
+function isDatabaseSchema(value: unknown): value is DatabaseSchema {
+  if (typeof value !== "object" || value === null) {
+    return false;
+  }
+  const database = value as Partial<DatabaseSchema>;
+  return (
+    typeof database.version === "number" &&
+    Array.isArray(database.users) &&
+    Array.isArray(database.assets) &&
+    Array.isArray(database.logs) &&
+    Array.isArray(database.preferences) &&
+    (database.scanEvents === undefined || Array.isArray(database.scanEvents))
+  );
+}
+
+export function persist(database: DatabaseSchema, databaseFile = DB_FILE): void {
   globalThis.__assetflowDatabase = database;
   try {
-    fs.mkdirSync(DATA_DIR, { recursive: true });
-    fs.writeFileSync(DB_FILE, `${JSON.stringify(database, null, 2)}\n`, "utf8");
+    fs.mkdirSync(path.dirname(databaseFile), { recursive: true });
+    fs.writeFileSync(databaseFile, `${JSON.stringify(database, null, 2)}\n`, "utf8");
   } catch {
     // A read-only filesystem only degrades persistence for this process.
   }
 }
 
-function loadDatabase(): DatabaseSchema {
-  const cached = globalThis.__assetflowDatabase;
-  if (cached) {
-    return cached;
-  }
-  try {
-    const raw = fs.readFileSync(DB_FILE, "utf8");
-    const parsed = JSON.parse(raw) as DatabaseSchema;
-    if (parsed && Array.isArray(parsed.users) && Array.isArray(parsed.assets)) {
-      if (!Array.isArray(parsed.scanEvents)) {
-        parsed.scanEvents = [];
-      }
-      globalThis.__assetflowDatabase = parsed;
-      return parsed;
+export function loadDatabase(databaseFile = DB_FILE): DatabaseSchema {
+  if (databaseFile === DB_FILE) {
+    const cached = globalThis.__assetflowDatabase;
+    if (cached) {
+      return cached;
     }
-  } catch {
-    // missing or corrupt file — fall through to a fresh seed
   }
-  const seeded = createSeedDatabase();
-  persist(seeded);
-  return seeded;
+
+  let raw: string;
+  try {
+    raw = fs.readFileSync(databaseFile, "utf8");
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+      throw new Error("DATABASE_READ_FAILED");
+    }
+    const empty = createEmptyDatabase();
+    persist(empty, databaseFile);
+    return empty;
+  }
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    throw new Error("DATABASE_CORRUPT_PRESERVED");
+  }
+
+  if (!isDatabaseSchema(parsed)) {
+    throw new Error("DATABASE_CORRUPT_PRESERVED");
+  }
+
+  const database: DatabaseSchema = {
+    ...parsed,
+    scanEvents: Array.isArray(parsed.scanEvents) ? parsed.scanEvents : [],
+  };
+  if (databaseFile === DB_FILE) {
+    globalThis.__assetflowDatabase = database;
+  }
+  return database;
 }
 
 function newId(prefix: string): string {

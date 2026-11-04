@@ -4,7 +4,7 @@ import { getRepository } from "@/lib/data";
 import { handleApiError } from "@/lib/api/server";
 import type { CategoryCount, DashboardResponse } from "@/lib/api/types";
 import { ASSET_CATEGORIES } from "@/lib/constants";
-import { categoryDistributions, countByStatus } from "@/lib/analytics";
+import { categoryDistributions, statusDistribution } from "@/lib/analytics";
 
 export const dynamic = "force-dynamic";
 
@@ -17,15 +17,15 @@ export async function GET() {
       repository.listRecentLogs(8),
     ]);
 
-    const statusCounts = countByStatus(assets);
+    const statusCounts = statusDistribution(assets);
     const categoryCounts = new Map<string, number>();
 
     for (const asset of assets) {
       categoryCounts.set(asset.category, (categoryCounts.get(asset.category) ?? 0) + 1);
     }
 
-    const byStatus = Object.entries(statusCounts).map(([status, count]) => ({
-      status: status as DashboardResponse["byStatus"][number]["status"],
+    const byStatus = statusCounts.map(({ status, count }) => ({
+      status,
       count,
     }));
 
