@@ -6,7 +6,7 @@ import type { ImportCommitResult, ImportRecordInput } from "@/lib/import/types";
 import { validateImportRows } from "@/lib/import/validate";
 import { executeAssetImport } from "@/lib/import/execute";
 
-export const MAX_IMPORT_ITEMS = 2000;
+const MAX_IMPORT_ITEMS = 2000;
 
 interface ImportItemPayload {
   tag: string;
