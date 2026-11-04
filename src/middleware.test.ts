@@ -3,17 +3,34 @@ import { NextRequest } from "next/server";
 
 const mocks = vi.hoisted(() => ({
   user: null as unknown,
+  configurationError: null as Error | null,
 }));
 
+vi.mock("@/lib/supabase/env", () => {
+  class SupabaseConfigError extends Error {
+    constructor(message: string) {
+      super(message);
+      this.name = "SupabaseConfigError";
+    }
+  }
+  return { SupabaseConfigError };
+});
+
 vi.mock("@/lib/supabase/middleware", () => ({
-  createMiddlewareSupabaseClient: () => ({
-    auth: {
-      getUser: async () => ({ data: { user: mocks.user } }),
-    },
-  }),
+  createMiddlewareSupabaseClient: () => {
+    if (mocks.configurationError) {
+      throw mocks.configurationError;
+    }
+    return {
+      auth: {
+        getUser: async () => ({ data: { user: mocks.user } }),
+      },
+    };
+  },
 }));
 
 import { middleware } from "./middleware";
+import { SupabaseConfigError } from "@/lib/supabase/env";
 
 function request(path: string, cookie?: string): NextRequest {
   return new NextRequest(`http://localhost${path}`, {
@@ -31,9 +48,25 @@ function locationOf(response: Response): string {
 
 beforeEach(() => {
   mocks.user = null;
+  mocks.configurationError = null;
 });
 
 describe("middleware — anonymous visitors", () => {
+  it("returns a clear JSON 500 when Supabase public configuration is missing", async () => {
+    mocks.configurationError = new SupabaseConfigError(
+      "Set the missing environment variable(s): NEXT_PUBLIC_SUPABASE_URL.",
+    );
+
+    const response = await run("/dashboard");
+
+    expect(response.status).toBe(500);
+    expect(response.headers.get("content-type")).toContain("application/json");
+    expect(await response.json()).toEqual({
+      error: "server_configuration_error",
+      message: expect.stringContaining("NEXT_PUBLIC_SUPABASE_URL"),
+    });
+  });
+
   it("redirects private pages to /login with a safe return destination", async () => {
     const response = await run("/dashboard");
     expect(response.status).toBe(307);

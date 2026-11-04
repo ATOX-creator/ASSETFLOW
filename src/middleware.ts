@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { createMiddlewareSupabaseClient } from "@/lib/supabase/middleware";
+import { SupabaseConfigError } from "@/lib/supabase/env";
 import {
   DEFAULT_AUTH_DESTINATION,
   LEGACY_SESSION_COOKIE,
@@ -70,10 +71,23 @@ export async function middleware(request: NextRequest) {
     });
   }
 
-  const supabase = createMiddlewareSupabaseClient(request, response);
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  let user;
+  try {
+    const supabase = createMiddlewareSupabaseClient(request, response);
+    const result = await supabase.auth.getUser();
+    user = result.data.user;
+  } catch (error) {
+    if (error instanceof SupabaseConfigError) {
+      return NextResponse.json(
+        {
+          error: "server_configuration_error",
+          message: error.message,
+        },
+        { status: 500 },
+      );
+    }
+    throw error;
+  }
 
   const isApi = pathname.startsWith("/api/");
 
