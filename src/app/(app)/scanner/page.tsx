@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import Link from "next/link";
 import {
   CircleCheck,
@@ -17,9 +17,10 @@ import { apiGet, apiSend, errorMessage } from "@/lib/api/client";
 import { notifyDataChanged } from "@/lib/dataRefresh";
 import type { AssetsResponse, ScanResponse } from "@/lib/api/types";
 import type { AssetLogRecord, AssetRecord } from "@/lib/data";
-import { ASSET_CATEGORIES, ASSET_STATUSES, isAssetStatus, type AssetCategory, type AssetStatus } from "@/lib/constants";
+import { ASSET_STATUSES, isAssetStatus, type AssetStatus } from "@/lib/constants";
 import {
   extractIdentifiers,
+  validateIdentifier,
   type ExtractedIdentifier,
 } from "@/lib/scan/identifiers";
 import { TONE_BADGE, toneOf } from "@/lib/visuals";
@@ -27,7 +28,7 @@ import { EmptyBlock } from "@/components/StateBlocks";
 
 type Stage =
   | "idle"
-  | "review"
+  | "capture_review"
   | "looking"
   | "found"
   | "unknown"
@@ -54,10 +55,6 @@ export default function ScannerPage() {
   const [scan, setScan] = useState<ScanResult | null>(null);
   const [asset, setAsset] = useState<AssetRecord | null>(null);
   const [selectedStatus, setSelectedStatus] = useState<AssetStatus>("available");
-  const [form, setForm] = useState<{ name: string; category: AssetCategory }>({
-    name: "",
-    category: "other",
-  });
   const [message, setMessage] = useState<string | null>(null);
   const [savedAsset, setSavedAsset] = useState<AssetRecord | null>(null);
   const [savedLog, setSavedLog] = useState<AssetLogRecord | null>(null);
@@ -65,6 +62,10 @@ export default function ScannerPage() {
   const [activeIdentifier, setActiveIdentifier] = useState<ExtractedIdentifier | null>(null);
   const [serialStage, setSerialStage] = useState<SerialStage>("ready");
   const [serialLogged, setSerialLogged] = useState<ExtractedIdentifier | null>(null);
+  const [reviewValue, setReviewValue] = useState("");
+  const [rescanSignal, setRescanSignal] = useState(0);
+  const submittingRef = useRef(false);
+  const submissionIdRef = useRef("");
 
   const logScanEvent = useCallback(
     async (identifier: ExtractedIdentifier, method: ScanResult["method"]) => {
@@ -108,13 +109,11 @@ export default function ScannerPage() {
         if (match) {
           setAsset(match);
           setSelectedStatus(match.status);
-          setForm({ name: match.name, category: match.category });
           setStage("found");
           return;
         }
 
         setAsset(null);
-        setForm({ name: "", category: "other" });
         setSelectedStatus("available");
         setStage("unknown");
       } catch (reason) {
@@ -126,7 +125,7 @@ export default function ScannerPage() {
   );
 
   const handleScanComplete = useCallback(
-    async (result: ScanResult) => {
+    (result: ScanResult) => {
       setScan(result);
       setMessage(null);
       setSavedAsset(null);
@@ -134,29 +133,45 @@ export default function ScannerPage() {
       setSerialLogged(null);
 
       const identifiers = extractIdentifiers(result.payload);
+      setCandidates(identifiers);
       if (identifiers.length === 0) {
-        setStage("error");
-        setMessage(t("scanner.noValidIdentifier"));
-        return;
+        setReviewValue(result.payload);
+      } else {
+        setReviewValue(identifiers[0]?.value ?? "");
       }
-      if (identifiers.length > 1) {
-        setCandidates(identifiers);
-        setStage("review");
-        return;
-      }
-      const only = identifiers[0];
-      if (!only) {
-        setStage("error");
-        setMessage(t("scanner.noValidIdentifier"));
-        return;
-      }
-      await processIdentifier(only, result);
+      setStage("capture_review");
     },
-    [processIdentifier, t],
+    [],
   );
 
+  const confirmCapturedValue = useCallback(() => {
+    if (!scan || submittingRef.current) {
+      return;
+    }
+    const validated = validateIdentifier(reviewValue);
+    if (!validated.ok) {
+      setMessage(t("scanner.noValidIdentifier"));
+      return;
+    }
+    setMessage(null);
+    void processIdentifier(validated.identifier, scan);
+  }, [processIdentifier, reviewValue, scan, t]);
+
+  const rejectCapturedValue = useCallback(() => {
+    setStage("idle");
+    setScan(null);
+    setAsset(null);
+    setMessage(null);
+    setCandidates([]);
+    setActiveIdentifier(null);
+    setReviewValue("");
+    submittingRef.current = false;
+    submissionIdRef.current = "";
+    setRescanSignal((value) => value + 1);
+  }, []);
+
   const saveScan = useCallback(async () => {
-    if (!scan || stage === "saving") {
+    if (!scan || !asset || stage === "saving" || submittingRef.current) {
       return;
     }
     const tag = activeIdentifier?.value ?? scan.payload.trim();
@@ -165,28 +180,20 @@ export default function ScannerPage() {
       return;
     }
 
+    submittingRef.current = true;
+    if (!submissionIdRef.current) {
+      submissionIdRef.current = crypto.randomUUID?.() ?? `${Date.now()}-${Math.random()}`;
+    }
     setStage("saving");
     setMessage(null);
 
-    const body: Record<string, unknown> = {
-      tag,
-      status: selectedStatus,
-      format: scan.format,
-    };
-
-    if (!asset) {
-      const name = form.name.trim();
-      if (!name) {
-        setMessage(t("scanner.nameRequired"));
-        setStage("unknown");
-        return;
-      }
-      body.name = name;
-      body.category = form.category;
-    }
-
     try {
-      const result = await apiSend<ScanResponse>("/api/scan", "POST", body);
+      const result = await apiSend<ScanResponse>("/api/scan", "POST", {
+        tag,
+        status: selectedStatus,
+        format: scan.format,
+        submissionId: submissionIdRef.current,
+      });
       if (activeIdentifier) {
         void logScanEvent(activeIdentifier, scan.method);
       }
@@ -197,14 +204,17 @@ export default function ScannerPage() {
       setStage("saved");
     } catch (reason) {
       setMessage(errorMessage(reason, t("scanner.saveError")));
-      setStage(asset ? "found" : "unknown");
+      setStage("found");
+    } finally {
+      submittingRef.current = false;
     }
-  }, [activeIdentifier, asset, form, logScanEvent, scan, selectedStatus, stage, t]);
+  }, [activeIdentifier, asset, logScanEvent, scan, selectedStatus, stage, t]);
 
   const logSerial = useCallback(async () => {
-    if (!activeIdentifier || serialStage === "logging") {
+    if (!activeIdentifier || serialStage === "logging" || submittingRef.current) {
       return;
     }
+    submittingRef.current = true;
     setSerialStage("logging");
     setMessage(null);
     try {
@@ -224,6 +234,8 @@ export default function ScannerPage() {
     } catch (reason) {
       setMessage(errorMessage(reason, t("scanner.saveError")));
       setSerialStage("ready");
+    } finally {
+      submittingRef.current = false;
     }
   }, [activeIdentifier, scan, serialStage, t]);
 
@@ -238,15 +250,21 @@ export default function ScannerPage() {
     setActiveIdentifier(null);
     setSerialStage("ready");
     setSerialLogged(null);
+    setReviewValue("");
+    submittingRef.current = false;
+    submissionIdRef.current = "";
     setSelectedStatus("available");
-    setForm({ name: "", category: "other" });
+    setRescanSignal((value) => value + 1);
   }, []);
 
   const busy = stage === "saving" || stage === "looking";
 
   return (
     <div className="mx-auto grid max-w-[1600px] items-start gap-6 xl:grid-cols-[minmax(0,380px)_minmax(0,1fr)]">
-      <OpticalScanner onScanComplete={handleScanComplete} />
+      <OpticalScanner
+        onScanComplete={handleScanComplete}
+        rescanSignal={rescanSignal}
+      />
 
       <section className="panel overflow-hidden">
         <header className="flex flex-wrap items-center justify-between gap-3 border-b border-line/40 bg-header px-5 py-4">
@@ -281,54 +299,55 @@ export default function ScannerPage() {
             <EmptyBlock title={t("scanner.awaiting")} hint={t("scanner.awaitingHint")} />
           )}
 
+          {stage === "capture_review" && scan && (
+            <div className="flex flex-col gap-4" role="group" aria-label="Review captured value">
+              <div className="rounded-xl border border-warning/40 bg-warning/10 px-4 py-3">
+                <p className="text-sm font-semibold text-ink">Review captured value</p>
+                <p className="mt-1 text-xs text-muted">
+                  Capture method: {scan.method === "qr_code" ? "QR code" : scan.method === "barcode" ? "Barcode" : scan.method === "camera_ocr" ? "OCR text" : "Text"}
+                </p>
+              </div>
+              <label htmlFor="captured-value" className="eyebrow">Captured value</label>
+              <input
+                id="captured-value"
+                type="text"
+                value={reviewValue}
+                onChange={(event) => setReviewValue(event.target.value)}
+                className="field font-mono text-accent"
+                autoComplete="off"
+              />
+              {candidates.length > 1 && (
+                <div className="flex flex-wrap gap-2" aria-label="Detected identifiers">
+                  {candidates.map((candidate) => (
+                    <button
+                      key={`${candidate.type}-${candidate.value}`}
+                      type="button"
+                      onClick={() => setReviewValue(candidate.value)}
+                      className="btn-ghost font-mono text-xs"
+                    >
+                      {candidate.value}
+                    </button>
+                  ))}
+                </div>
+              )}
+              {message && <p role="alert" className="text-xs text-danger">{message}</p>}
+              <div className="flex flex-wrap gap-2">
+                <button type="button" onClick={confirmCapturedValue} className="btn-primary">
+                  <CircleCheck className="h-4 w-4" aria-hidden="true" />
+                  Confirm and continue
+                </button>
+                <button type="button" onClick={rejectCapturedValue} className="btn-ghost">
+                  <CircleX className="h-4 w-4" aria-hidden="true" />
+                  Reject and scan again
+                </button>
+              </div>
+            </div>
+          )}
+
           {stage === "looking" && (
             <div className="flex items-center gap-3 px-2 py-10 text-muted">
               <LoaderCircle className="h-4 w-4 animate-spin text-accent" aria-hidden="true" />
               <span className="text-sm">{t("scanner.lookingUp")}</span>
-            </div>
-          )}
-
-          {stage === "review" && (
-            <div className="flex flex-col gap-4">
-              <div className="rounded-xl border border-warning/40 bg-warning/10 px-4 py-3">
-                <p className="text-sm font-semibold text-ink">
-                  {t("scanner.reviewIdentifiers")}
-                </p>
-                <p className="mt-1 text-xs text-muted">
-                  {t("scanner.reviewIdentifiersHint")}
-                </p>
-              </div>
-              <ul className="flex flex-col gap-2">
-                {candidates.map((candidate, index) => (
-                  <li key={`${candidate.type}-${candidate.value}-${index}`}>
-                    <button
-                      type="button"
-                      onClick={() =>
-                        scan ? void processIdentifier(candidate, scan) : undefined
-                      }
-                      disabled={!scan}
-                      className="flex w-full items-center justify-between gap-3 rounded-xl border border-line/50 bg-inset px-4 py-3 text-left transition-colors hover:border-accent/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent disabled:cursor-not-allowed disabled:opacity-60"
-                    >
-                      <span className="min-w-0">
-                        <span className="block font-mono text-sm text-accent">
-                          {candidate.value}
-                        </span>
-                        <span className="block text-[10px] uppercase tracking-[0.14em] text-muted">
-                          {candidate.type === "asset_tag"
-                            ? t("scanner.identifierAssetTag")
-                            : t("scanner.identifierSerial")}
-                        </span>
-                      </span>
-                      <span className="btn-ghost shrink-0">
-                        {t("scanner.chooseIdentifier")}
-                      </span>
-                    </button>
-                  </li>
-                ))}
-              </ul>
-              <button type="button" onClick={reset} className="btn-ghost self-start">
-                {t("common.cancel")}
-              </button>
             </div>
           )}
 
@@ -474,98 +493,13 @@ export default function ScannerPage() {
             </div>
           )}
 
-          {(stage === "unknown" || (stage === "saving" && !asset)) && scan && (
+          {(stage === "unknown") && scan && (
             <div className="flex flex-col gap-4">
               <div className="rounded-xl border border-warning/40 bg-warning/10 px-4 py-3">
-                <div className="flex items-start gap-2">
-                  <CircleX className="mt-0.5 h-4 w-4 shrink-0 text-warning" aria-hidden="true" />
-                  <div className="min-w-0">
-                    <p className="text-sm font-semibold text-ink">{t("scanner.notFound")}</p>
-                    <p className="text-xs text-muted">
-                      {t("scanner.notFoundHint", {
-                        tag: activeIdentifier?.value ?? scan.payload.trim(),
-                      })}
-                    </p>
-                  </div>
-                </div>
+                <p className="text-sm font-semibold text-ink">{t("scanner.notFound")}</p>
+                <p className="text-xs text-muted">{t("scanner.notFoundHint", { tag: activeIdentifier?.value ?? scan.payload.trim() })}</p>
               </div>
-
-              <div className="rounded-xl border border-line/50 bg-inset p-4">
-                <p className="eyebrow mb-3">{t("scanner.registerTitle")}</p>
-                <p className="mb-4 text-xs text-muted">{t("scanner.registerHint")}</p>
-
-                <div className="grid gap-4 sm:grid-cols-2">
-                  <div className="flex flex-col gap-1.5 sm:col-span-2">
-                    <label htmlFor="new-asset-name" className="eyebrow">
-                      {t("scanner.assetName")}
-                    </label>
-                    <input
-                      id="new-asset-name"
-                      type="text"
-                      value={form.name}
-                      onChange={(event) =>
-                        setForm((previous) => ({ ...previous, name: event.target.value }))
-                      }
-                      placeholder={t("scanner.assetNamePlaceholder")}
-                      className="field"
-                    />
-                  </div>
-
-                  <div className="flex flex-col gap-1.5">
-                    <label htmlFor="new-asset-tag" className="eyebrow">
-                      {t("scanner.tag")}
-                    </label>
-                    <input
-                      id="new-asset-tag"
-                      type="text"
-                      value={activeIdentifier?.value ?? scan.payload.trim()}
-                      readOnly
-                      className="field font-mono text-accent"
-                    />
-                  </div>
-
-                  <div className="flex flex-col gap-1.5">
-                    <label htmlFor="new-asset-category" className="eyebrow">
-                      {t("scanner.category")}
-                    </label>
-                    <select
-                      id="new-asset-category"
-                      value={form.category}
-                      onChange={(event) =>
-                        setForm((previous) => ({
-                          ...previous,
-                          category: event.target.value as AssetCategory,
-                        }))
-                      }
-                      className="field cursor-pointer"
-                    >
-                      {ASSET_CATEGORIES.map((category) => (
-                        <option key={category} value={category}>
-                          {tCategory(category)}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                </div>
-
-                <div className="mt-4 flex flex-col gap-1.5">
-                  <label htmlFor="new-asset-status" className="eyebrow">
-                    {t("scanner.selectStatus")}
-                  </label>
-                  <select
-                    id="new-asset-status"
-                    value={selectedStatus}
-                    onChange={(event) => setSelectedStatus(event.target.value as AssetStatus)}
-                    className="field cursor-pointer"
-                  >
-                    {ASSET_STATUSES.map((status) => (
-                      <option key={status} value={status}>
-                        {tStatus(status)}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              </div>
+              <button type="button" onClick={rejectCapturedValue} className="btn-ghost self-start">Retry scanning</button>
             </div>
           )}
 
@@ -662,7 +596,7 @@ export default function ScannerPage() {
             </p>
           )}
 
-          {(stage === "found" || stage === "unknown" || stage === "saving") && (
+          {(stage === "found" || stage === "saving") && (
             <div className="flex flex-wrap gap-2 border-t border-line/40 pt-4">
               <button
                 type="button"

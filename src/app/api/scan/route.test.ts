@@ -139,7 +139,7 @@ describe("POST /api/scan", () => {
     expect(countByStatus(mocks.assets).in_repair).toBe(1);
   });
 
-  it("creates a new asset for an unknown tag with manual registration data", async () => {
+  it("does not create a new asset for an unknown tag", async () => {
     const response = await POST(
       request({
         tag: "NEW-900",
@@ -149,14 +149,36 @@ describe("POST /api/scan", () => {
         format: "MANUAL_INPUT",
       }),
     );
-    expect(response.status).toBe(200);
-    expect(mocks.calls.createAsset).toHaveLength(1);
-    expect(mocks.assets).toHaveLength(2);
-    expect(countByStatus(mocks.assets).available).toBe(1);
+    expect(response.status).toBe(404);
+    expect(mocks.calls.createAsset).toHaveLength(0);
+    expect(mocks.assets).toHaveLength(1);
+  });
+
+  it("rejects repeated confirmed submissions with the same submission id", async () => {
+    const body = {
+      tag: "LAP-001",
+      status: "deployed",
+      submissionId: "scan_duplicate_test",
+    };
+    const first = await POST(request(body));
+    const second = await POST(request(body));
+    expect(first.status).toBe(200);
+    expect(second.status).toBe(409);
+    expect(mocks.calls.createLog).toBe(1);
+  });
+
+  it("rejects invalid identifiers server-side", async () => {
+    const response = await POST(
+      request({ tag: "hello world", status: "available" }),
+    );
+    expect(response.status).toBe(400);
+    expect(mocks.calls.createAsset).toHaveLength(0);
+    expect(mocks.calls.updateAsset).toHaveLength(0);
+    expect(mocks.calls.createLog).toBe(0);
   });
 
   it("rejects an unknown tag without registration data", async () => {
-    const response = await POST(request({ tag: "GHOST-1", status: "available" }));
+    const response = await POST(request({ tag: "GHOST-123", status: "available" }));
     expect(response.status).toBe(404);
     expect(mocks.calls.createAsset).toEqual([]);
     expect(mocks.assets).toHaveLength(1);

@@ -69,6 +69,7 @@ interface CameraFault {
 
 interface OpticalScannerProps {
   onScanComplete: (scan: ScanResult) => void;
+  rescanSignal?: number;
 }
 
 const READER_ELEMENT_ID = "reader";
@@ -154,7 +155,7 @@ function ReadoutCell({ label, value }: { label: string; value: string }) {
   );
 }
 
-export default function OpticalScanner({ onScanComplete }: OpticalScannerProps) {
+export default function OpticalScanner({ onScanComplete, rescanSignal = 0 }: OpticalScannerProps) {
   const { t } = useApp();
   const [phase, setPhase] = useState<ScanPhase>("idle");
   const [fault, setFault] = useState<CameraFault | null>(null);
@@ -475,6 +476,7 @@ export default function OpticalScanner({ onScanComplete }: OpticalScannerProps) 
     try {
       scanner.resume();
       lockRef.current = false;
+      seenRef.current = null;
       if (mountedRef.current) {
         setResult(null);
         setPhase("scanning");
@@ -483,6 +485,12 @@ export default function OpticalScanner({ onScanComplete }: OpticalScannerProps) 
       void startScanner();
     }
   }, [startScanner]);
+
+  useEffect(() => {
+    if (rescanSignal > 0) {
+      resumeScanner();
+    }
+  }, [rescanSignal, resumeScanner]);
 
   const toggleTorch = useCallback(async (): Promise<void> => {
     const scanner = scannerRef.current;
