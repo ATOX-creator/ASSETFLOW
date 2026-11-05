@@ -7,6 +7,10 @@
     "nodejs_compat",
     "global_fetch_strictly_public"
   ],
+  "vars": {
+    "NEXT_PUBLIC_SUPABASE_URL": "https://iozubgkneimsxnqvnrrz.supabase.co",
+    "NEXT_PUBLIC_SUPABASE_ANON_KEY": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImlvenViZ2tuZWltc3hucXZucnJ6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjAyMzgyNTgsImV4cCI6MjA3NTgxNDI1OH0.4vRqlDGUbOcThqHVcEv9Pw7uQa3rm84csoNTyCrueyE"
+  },
   "assets": {
     "directory": ".open-next/assets",
     "binding": "ASSETS"
