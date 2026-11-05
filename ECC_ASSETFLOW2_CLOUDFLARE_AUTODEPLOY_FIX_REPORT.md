@@ -1,86 +1,95 @@
-# ASSETFLOW-2 Cloudflare Auto-Deployment Fix Report
+﻿# ASSETFLOW-2 Cloudflare Auto-Deployment Fix Report
 
 ## Verdict
 
-**PARTIAL** — Repository configuration was corrected so the standard `npm run build` step invokes the OpenNext Cloudflare build. The push and automatic Cloudflare deployment still require verification. Local verification is blocked by Windows output-directory permissions after a stale `.open-next` output was detected; no destructive cleanup was performed.
+**PARTIAL** — Repository configuration and the OpenNext Cloudflare build were fixed and verified locally. The Cloudflare Workers Builds dashboard command and the resulting automatic deployment remain unverified and require manual inspection.
 
 ## Initial repository and Git state
 
-- Root: `C:\Users\toumi.admin\Desktop\Assetflow`
+- Repository root: `C:\Users\toumi.admin\Desktop\Assetflow`
 - Branch: `preview`
-- HEAD before changes: `95544b30c466b28ddcd26be1f2df1c154e8715a0`
-- Remote tracking: `origin/preview` matched HEAD, with `0` commits ahead and `0` behind
-- Working tree before changes: clean for tracked files; existing ECC report Markdown files were untracked and preserved
-- Remotes:
-  - `origin`: https://github.com/ATOX-creator/ASSETFLOW.git
-  - `atox`: https://github.com/ATOX-creator/ASSETFLOW.git
-  - `atox2`: https://github.com/ATOX-creator/ASSETFLOW-2.git
+- Initial HEAD: `3cd507fef02801b2b908acb6916c8d72b2962df7`
+- Initial upstream: `origin/preview`
+- Initial divergence: local `preview` was 3 commits ahead of `origin/preview` and 0 behind
+- Known commit `95544b30c466b28ddcd26be1f2df1c154e8715a0` existed locally and was an ancestor of HEAD
+- Configured remotes:
+  - `origin`: `https://github.com/ATOX-creator/ASSETFLOW.git`
+  - `atox`: same ASSETFLOW repository
+  - `atox2`: `https://github.com/ATOX-creator/ASSETFLOW-2.git`
+- Initial tracked working tree had no staged or unstaged changes. Existing untracked ECC reports were preserved.
 
 ## Root cause confirmed
 
-The Cloudflare dashboard was executing a generic build/deploy path instead of first producing `.open-next/worker.js`. The repository's `package.json` initially used `next build --turbopack`; it now uses the installed OpenNext Cloudflare CLI for the standard build script.
-
-The `wrangler.jsonc` Worker name was already correct at preflight and did not require modification. It declares:
-
-- `name`: `assetflow-2`
-- `main`: `.open-next/worker.js`
-- assets directory: `.open-next/assets`
-- existing compatibility, assets, binding, self-reference, images, and observability settings preserved unchanged
+`wrangler.jsonc` had Worker name `assetflow` instead of the existing Worker name `assetflow-2`. Cloudflare also invoked `npx wrangler deploy` without producing `.open-next/worker.js` first. The repository already had a valid OpenNext build script; this task corrected the Worker identity and its self-reference binding consistently.
 
 ## Files changed and rationale
 
-- `package.json`: replaced the generic `next build --turbopack` script with `opennextjs-cloudflare build --dangerouslyUseUnsupportedNextVersion`. This makes the repository's build step generate the Cloudflare Worker output required by the existing deploy command.
-- `ECC_ASSETFLOW2_CLOUDFLARE_AUTODEPLOY_FIX_REPORT.md`: task-specific ECC verification report.
+- `wrangler.jsonc`
+  - Changed `name` from `assetflow` to `assetflow-2`.
+  - Changed `WORKER_SELF_REFERENCE.service` from `assetflow` to `assetflow-2` so it targets the renamed Worker.
+  - Preserved the entry point `.open-next/worker.js`, compatibility settings and flags, assets, images, observability, and existing binding structure.
+- `ECC_ASSETFLOW2_CLOUDFLARE_AUTODEPLOY_FIX_REPORT.md`
+  - Updated this task-specific ECC report.
 
 ## Exact build command verified
 
-`npx opennextjs-cloudflare build --dangerouslyUseUnsupportedNextVersion`
+Repository build script:
 
-The installed package supports this command and exposes the `build` subcommand. Existing scripts also use the same sequence for preview and deploy:
+```text
+npm run cf:build
+```
 
-- `preview`: OpenNext build, then OpenNext preview
-- `deploy`: OpenNext build, then OpenNext deploy
+Which runs:
 
-## Dependency and configuration verification
+```text
+opennextjs-cloudflare build
+```
 
-- Next.js: `15.5.27`
-- `@opennextjs/cloudflare`: `1.20.10`
-- Wrangler: `4.150.0`
-- Wrangler configuration syntax loaded successfully in dry-run validation.
-- Wrangler name reported exactly as `assetflow-2`.
-- Wrangler entry point reported exactly as `.open-next/worker.js`.
+Installed package help confirmed `build` support and Next.js/OpenNext output generation. The `--dangerouslyUseUnsupportedNextVersion` flag was not required for the installed Next.js 15.5.29 version.
+
+Required dashboard sequence:
+
+```text
+Build command: npm run cf:build
+Deploy command: npx wrangler deploy
+```
+
+## Versions
+
+- Next.js: `15.5.29`
+- `@opennextjs/cloudflare`: `1.20.16`
+- Wrangler: `4.157.0`
+- `@opennextjs/aws`: `4.1.15`
 
 ## Verification commands and results
 
-- `git rev-parse`, branch, status, and remote checks: PASS; repository matched preview HEAD and expected upstream.
-- `npm ls next @opennextjs/cloudflare wrangler --depth=0`: PASS.
-- `npx opennextjs-cloudflare --help`: PASS; build command is supported.
-- `npx wrangler deploy --dry-run`: initially read the assets and binding configuration, but a stale/incomplete `.open-next/worker.js` subsequently caused unresolved durable-object module errors.
-- `npx opennextjs-cloudflare build --dangerouslyUseUnsupportedNextVersion`: FAILED locally on Windows with `EPERM` removing the existing `.open-next` directory. No clean operation or deletion was performed.
-- `npx tsc --noEmit`: PASS.
-- `npm run lint`: PASS.
-- `npm test`: PASS; 32 test files and 262 tests passed.
-- `git diff --check`: PASS.
+- `npm run cf:build` — PASS; OpenNext generated `.open-next/worker.js`.
+- Wrangler JSON/JSONC validation — PASS; name exactly `assetflow-2`, entry point `.open-next/worker.js`, assets directory `.open-next/assets`.
+- `npx wrangler deploy --dry-run` — PASS; no upload or deployment occurred. Dry-run reported binding `WORKER_SELF_REFERENCE (assetflow-2)`.
+- `npx tsc --noEmit` — PASS.
+- `npm run lint` — PASS.
+- `npm test` — PASS; 32 files and 263 tests passed.
+- `.open-next/worker.js` existence check — PASS.
+- `git diff --check` — PASS.
 
-## Automatic deployment status
-
-Not yet observable. Cloudflare's dashboard build/deploy settings remain a manual configuration step because this repository session has no authorized Cloudflare API access to inspect or modify Workers Builds settings.
-
-Configure Cloudflare Workers Builds as:
-
-- Build command: `npm run build`
-- Deploy command: `npx wrangler deploy`
-
-The repository build script now maps `npm run build` to `npx opennextjs-cloudflare build --dangerouslyUseUnsupportedNextVersion`. The deploy command must run only after that build completes. The dashboard is separate from repository configuration; changing this repository alone does not change dashboard settings.
+The OpenNext build emitted a generated-code negative-zero warning, but completed successfully. A test invocation with unsupported Vitest `--runInBand` was rejected and then rerun correctly with `npm test`; it caused no repository changes.
 
 ## Commit and push
 
-- Commit hash: pending until commit is created
-- Remotes successfully pushed: pending
+- Task commit before report metadata finalization: `1a320f0d3da630834cbfa1f1e9c0344c7244bc9c`
+- Remotes successfully pushed: `origin`, `atox`, and `atox2` (`preview`)
 
-## Confirmations
+## Cloudflare dashboard changes still required
 
-- No local Cloudflare deployment was run.
-- No Cloudflare secrets, bindings, routes, environment variables, OAuth settings, or Supabase configuration were changed.
-- Existing untracked ECC reports and user files were preserved and not staged.
-- Existing staged or unstaged user changes were none before this task.
+Repository files cannot change the Cloudflare Workers Builds dashboard settings. Configure the integration's build/deploy sequence as `npm run cf:build`, then `npx wrangler deploy`. The dashboard deploy step must run only after the OpenNext build completes.
+
+## Automatic deployment result
+
+Not yet observable in this repository session. This report remains **PARTIAL** until a triggered Cloudflare build can be inspected to confirm `.open-next/worker.js` generation, a `assetflow-2` deployment target, and successful deployment.
+
+## Preservation and deployment confirmations
+
+- No local Cloudflare deployment occurred; only `wrangler deploy --dry-run` was used.
+- No secrets, credentials, environment variables, OAuth configuration, Supabase configuration, routes, or Worker bindings other than the self-reference name were changed.
+- Existing ECC reports and untracked user files were preserved.
+- No generated build artifacts were staged, and no force push, reset, rebase, clean operation, Worker deletion/recreation, or destructive Git command was performed.
